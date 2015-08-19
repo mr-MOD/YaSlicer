@@ -1,1 +1,1 @@
-g++ -std=c++11 -O2 -ftree-vectorize -pipe -DHAVE_LIBBCM_HOST -I/opt/vc/include/ -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux -I./ -L/opt/vc/lib/ -lpng -lGLESv2 -lEGL -lbcm_host -lpthread Slicer.cpp Renderer.cpp -o Slicer
+g++ -std=c++11 -O2 -ftree-vectorize -pipe -DHAVE_LIBBCM_HOST -I/opt/vc/include/ -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux -I./ -L/opt/vc/lib/ -lpng -lGLESv2 -lEGL -lbcm_host -lpthread Slicer.cpp Renderer.cpp Geometry.cpp Loaders.cpp CacheOpt.cpp -o Slicer

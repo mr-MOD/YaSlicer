@@ -18,7 +18,7 @@
 #include <array>
 #include <future>
 
-#include <stdint.h>
+#include <cstdint>
 
 #undef min
 #undef max
@@ -93,28 +93,35 @@ class Renderer
 		GLuint renderBufferDepth;
 		GLuint fbo;
 
-		std::vector<GLuint> vBuffersFront;
-		std::vector<GLuint> vBuffersBack;
-		std::vector<GLuint> vBuffersVertical;
+		std::vector<GLuint> vBuffers;
+		std::vector<GLuint> iBuffers;
 
-		std::vector<GLuint> iBuffersFront;
-		std::vector<GLuint> iBuffersBack;
-		std::vector<GLuint> iBuffersVertical;
+		struct TriangleData
+		{
+			TriangleData() :
+				frontFacing(0), orthoFacing(0), backFacing(0)
+			{
+			}
+			TriangleData(GLsizei frontFacing, GLsizei orthoFacing, GLsizei backFacing) :
+				frontFacing(frontFacing), orthoFacing(orthoFacing), backFacing(backFacing)
+			{
+			}
+			GLsizei frontFacing;
+			GLsizei orthoFacing;
+			GLsizei backFacing;
+		};
+		std::vector<TriangleData> iCount;
 	};
 
 	struct ModelData
 	{
-		ModelData();
+		ModelData() : pos()
+		{
+		}
 
 		float pos;
-		uint32_t numFront;
-		uint32_t numBack;
-		uint32_t numVertical;
-
 		glm::vec3 min;
 		glm::vec3 max;
-
-		std::vector<float> geometry;
 	};
 public:
 	Renderer(const Settings& settings);
@@ -130,8 +137,7 @@ public:
 	void SetMask(uint32_t n);
 
 private:
-	void LoadStl();
-	void LoadObj(const std::string& file, std::vector<float>& vb, std::vector<int>& ib);
+	
 	void LoadMasks();
 	
 	uint32_t GetLayersCount() const;

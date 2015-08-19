@@ -6,26 +6,29 @@
  */
 
 #include "Renderer.h"
+#include "Png.h"
+#include "Loaders.h"
+#include "Geometry.h"
+#include "CacheOpt.h"
 
 #include <stdexcept>
-#include <sstream>
 #include <numeric>
 #include <fstream>
 #include <iostream>
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <unordered_map>
 
 #include <thread>
 #include <cerrno>
 
-#include <png.h>
-
 #undef min
 #undef max
 
+#ifdef WIN32
 #define ANGLE_ANTIALIASING
+#endif
+
 #define SHADER(...) #__VA_ARGS__
 
 #ifdef HAVE_LIBBCM_HOST
@@ -148,8 +151,6 @@ const std::string DownScaleFShader[]
 	"void main() { gl_FragColor = texture2DLodEXT(texture, texCoord, lod); }\n"
 };
 
-void WritePng(const std::string& fileName, uint32_t width, uint32_t height, const std::vector<uint8_t>& pixData);
-std::vector<uint8_t> ReadPng(const std::string& fileName, uint32_t& width, uint32_t& height, uint32_t& bitsPerPixel);
 std::string glErrorString(GLenum err);
 void GlCheck(const std::string& s);
 void CheckRequiredExtensions(const std::string& extString);
@@ -230,19 +231,14 @@ Renderer::GLData::~GLData()
 		renderTexture = 0;
 	}
 #endif
-	if (vBuffersFront.size())
+	if (vBuffers.size())
 	{
-		glDeleteBuffers(static_cast<GLsizei>(vBuffersFront.size()), &vBuffersFront[0]);
+		glDeleteBuffers(static_cast<GLsizei>(vBuffers.size()), &vBuffers[0]);
 	}
 
-	if (vBuffersBack.size())
+	if (iBuffers.size())
 	{
-		glDeleteBuffers(static_cast<GLsizei>(vBuffersBack.size()), &vBuffersBack[0]);
-	}
-
-	if (vBuffersVertical.size())
-	{
-		glDeleteBuffers(static_cast<GLsizei>(vBuffersVertical.size()), &vBuffersVertical[0]);
+		glDeleteBuffers(static_cast<GLsizei>(iBuffers.size()), &iBuffers[0]);
 	}
 
 	if (machineMaskTexture[0] != 0)
@@ -301,11 +297,6 @@ Renderer::GLData::~GLData()
 		eglTerminate(display);
 		display = nullptr;
 	}
-}
-
-Renderer::ModelData::ModelData() :
-pos(), numFront(0), numBack(0), numVertical(0)
-{
 }
 
 GLuint CreateShader(GLenum type, const std::string& source)
@@ -574,7 +565,102 @@ settings_(settings), curMask_(0)
 
 	glHint(GL_GENERATE_MIPMAP_HINT, GL_NICEST);
 
-	LoadStl();
+	std::vector<float> vb;
+	std::vector<uint32_t> ib;
+	LoadStl(settings_.stlFile, vb, ib);
+
+	auto geometryBytes = vb.size()*sizeof(vb[0]) + ib.size()*sizeof(uint16_t);
+	auto surfaceBytes = settings_.renderWidth*settings_.renderHeight * 4 * 2;
+	std::cout << "This model requires at least " << (geometryBytes + surfaceBytes) / (1024 * 1024) << " megabytes VRAM" << std::endl;
+	
+	model_.min.x = model_.min.y = model_.min.z = std::numeric_limits<float>::max();
+	model_.max.x = model_.max.y = model_.max.z = std::numeric_limits<float>::lowest();
+	for (auto i = 0u; i < vb.size(); i += 3)
+	{
+		model_.min.x = std::min(model_.min.x, vb[i + 0]);
+		model_.min.y = std::min(model_.min.y, vb[i + 1]);
+		model_.min.z = std::min(model_.min.z, vb[i + 2]);
+
+		model_.max.x = std::max(model_.max.x, vb[i + 0]);
+		model_.max.y = std::max(model_.max.y, vb[i + 1]);
+		model_.max.z = std::max(model_.max.z, vb[i + 2]);
+	}
+	model_.pos = model_.min.z;
+
+	size_t optimizedVerts = 0;
+	size_t totalTris = ib.size() / 3;
+
+	const auto MaxVertCount = std::numeric_limits<uint16_t>::max();
+	SplitMesh(vb, ib, MaxVertCount, [this, &optimizedVerts](const std::vector<float>& vb, const std::vector<uint32_t>& ib) {
+		optimizedVerts += vb.size() / 3;
+
+		auto VertexCacheSize = 32;
+		GLData::TriangleData triData;
+		
+		std::vector<uint16_t> ib16;
+		ib16.assign(ib.begin(), ib.end());
+
+		typedef std::array<uint16_t, 3> Triangle;
+
+		auto triBegin = reinterpret_cast<Triangle*>(ib16.data());
+		auto triEnd = triBegin + ib16.size()/3;
+
+		auto frontEndIt = std::partition(triBegin, triEnd, [&vb](const Triangle& tri) {
+			auto e1x = vb[tri[1] * 3 + 0] - vb[tri[0] * 3 + 0];
+			auto e1y = vb[tri[1] * 3 + 1] - vb[tri[0] * 3 + 1];
+			auto e2x = vb[tri[2] * 3 + 0] - vb[tri[0] * 3 + 0];
+			auto e2y = vb[tri[2] * 3 + 1] - vb[tri[0] * 3 + 1];
+			auto nz = e1x*e2y - e1y*e2x;
+
+			return nz < 0;
+		});
+		auto orthoEndIt = std::partition(frontEndIt, triEnd, [&vb](const Triangle& tri) {
+			auto e1x = vb[tri[1] * 3 + 0] - vb[tri[0] * 3 + 0];
+			auto e1y = vb[tri[1] * 3 + 1] - vb[tri[0] * 3 + 1];
+			auto e2x = vb[tri[2] * 3 + 0] - vb[tri[0] * 3 + 0];
+			auto e2y = vb[tri[2] * 3 + 1] - vb[tri[0] * 3 + 1];
+			auto nz = e1x*e2y - e1y*e2x;
+
+			return nz == 0;
+		});
+
+		triData.frontFacing = static_cast<GLsizei>(std::distance(triBegin, frontEndIt) * 3);
+		triData.orthoFacing = static_cast<GLsizei>(std::distance(frontEndIt, orthoEndIt) * 3);
+		triData.backFacing = static_cast<GLsizei>(std::distance(orthoEndIt, triEnd) * 3);
+
+		std::vector<uint16_t>& ib16Opt = ib16;
+		/*std::vector<uint16_t> ib16Opt(ib16.size());
+		Forsyth::OptimizeFaces(ib16.data(),
+			static_cast<uint32_t>(triData.frontFacing),
+			static_cast<uint32_t>(vb.size() / 3),
+			ib16Opt.data(), VertexCacheSize);
+		Forsyth::OptimizeFaces(ib16.data() + triData.frontFacing,
+			static_cast<uint32_t>(triData.orthoFacing),
+			static_cast<uint32_t>(vb.size() / 3),
+			ib16Opt.data() + triData.frontFacing, VertexCacheSize);
+		Forsyth::OptimizeFaces(ib16.data() + triData.frontFacing + triData.orthoFacing,
+			static_cast<uint32_t>(triData.backFacing),
+			static_cast<uint32_t>(vb.size() / 3),
+			ib16Opt.data() + triData.frontFacing + triData.orthoFacing, VertexCacheSize);*/
+
+		GLuint buffers[2];
+		glGenBuffers(2, buffers);
+
+		glBindBuffer(GL_ARRAY_BUFFER, buffers[0]);
+		glBufferData(GL_ARRAY_BUFFER, vb.size() * sizeof(vb[0]), vb.data(), GL_STATIC_DRAW);
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[1]);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, ib16Opt.size() * sizeof(ib16Opt[0]), ib16Opt.data(), GL_STATIC_DRAW);
+
+		this->glData_.vBuffers.push_back(buffers[0]);
+		this->glData_.iBuffers.push_back(buffers[1]);
+		this->glData_.iCount.push_back(triData);
+	});
+
+	std::cout
+		<< "Source vertices: " << totalTris*3 << "\n"
+		<< "Optimized verts: " << optimizedVerts << "\n"
+		<< "Total triangles: " << totalTris << std::endl;
 	LoadMasks();
 }
 
@@ -712,47 +798,31 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 	glStencilFunc(GL_ALWAYS, 0, 0xFF);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
 	glCullFace(GL_FRONT);
-	for (auto i = 0u, triDrawn = 0u; i < glData_.vBuffersBack.size(); ++i, triDrawn += MaxTrianglesPerBuffer)
+	for (auto i = 0u; i < glData_.vBuffers.size(); ++i)
 	{
-		glBindBuffer(GL_ARRAY_BUFFER, glData_.vBuffersBack[i]);
+		glBindBuffer(GL_ARRAY_BUFFER, glData_.vBuffers[i]);
 		glVertexAttribPointer(glData_.mainVertexPosAttrib, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 		glEnableVertexAttribArray(glData_.mainVertexPosAttrib);
 
-		auto numVertices = std::min(model_.numBack - triDrawn, MaxTrianglesPerBuffer) * 3;
-		glDrawArrays(GL_TRIANGLES, 0, numVertices);
-	}
-	for (auto i = 0u, triDrawn = 0u; i < glData_.vBuffersVertical.size(); ++i, triDrawn += MaxTrianglesPerBuffer)
-	{
-		glBindBuffer(GL_ARRAY_BUFFER, glData_.vBuffersVertical[i]);
-		glVertexAttribPointer(glData_.mainVertexPosAttrib, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-		glEnableVertexAttribArray(glData_.mainVertexPosAttrib);
-
-		auto numVertices = std::min(model_.numVertical - triDrawn, MaxTrianglesPerBuffer) * 3;
-		glDrawArrays(GL_TRIANGLES, 0, numVertices);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glData_.iBuffers[i]);
+		glDrawElements(GL_TRIANGLES, glData_.iCount[i].orthoFacing + glData_.iCount[i].backFacing,
+			GL_UNSIGNED_SHORT, reinterpret_cast<void*>(glData_.iCount[i].frontFacing * sizeof(uint16_t)));
 	}
 
 	glStencilFunc(GL_ALWAYS, 0, 0xFF);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_DECR);
 	glCullFace(GL_BACK);
-	for (auto i = 0u, triDrawn = 0u; i < glData_.vBuffersFront.size(); ++i, triDrawn += MaxTrianglesPerBuffer)
+	for (auto i = 0u; i < glData_.vBuffers.size(); ++i)
 	{
-		glBindBuffer(GL_ARRAY_BUFFER, glData_.vBuffersFront[i]);
+		glBindBuffer(GL_ARRAY_BUFFER, glData_.vBuffers[i]);
 		glVertexAttribPointer(glData_.mainVertexPosAttrib, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 		glEnableVertexAttribArray(glData_.mainVertexPosAttrib);
 
-		auto numVertices = std::min(model_.numFront - triDrawn, MaxTrianglesPerBuffer) * 3;
-		glDrawArrays(GL_TRIANGLES, 0, numVertices);
-	}
-	for (auto i = 0u, triDrawn = 0u; i < glData_.vBuffersVertical.size(); ++i, triDrawn += MaxTrianglesPerBuffer)
-	{
-		glBindBuffer(GL_ARRAY_BUFFER, glData_.vBuffersVertical[i]);
-		glVertexAttribPointer(glData_.mainVertexPosAttrib, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-		glEnableVertexAttribArray(glData_.mainVertexPosAttrib);
-
-		auto numVertices = std::min(model_.numVertical - triDrawn, MaxTrianglesPerBuffer) * 3;
-		glDrawArrays(GL_TRIANGLES, 0, numVertices);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glData_.iBuffers[i]);
+		glDrawElements(GL_TRIANGLES, glData_.iCount[i].frontFacing, GL_UNSIGNED_SHORT, nullptr);
 	}
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 	GlCheck("Error rendering model");
 }
 
@@ -944,254 +1014,7 @@ void Renderer::SavePng(const std::string& fileName)
 }
 #endif // WIN32
 
-void Renderer::LoadStl()
-{
-	std::fstream f(settings_.stlFile, std::ios::in | std::ios::binary);
-	if (f.fail() || f.bad())
-	{
-		throw std::runtime_error(strerror(errno));
-	}
 
-	char header[80];
-	f.read(header, sizeof(header));
-
-	uint32_t numTriangles = 0;
-	f.read(reinterpret_cast<char*>(&numTriangles), sizeof(numTriangles));
-	std::cout << "Total triangles: " << numTriangles << std::endl;
-
-	auto numParts = numTriangles / MaxTrianglesPerBuffer + 1;
-
-	//model_.geometry.reserve(numTriangles * 3 * 3);
-
-	model_.max = glm::vec3(std::numeric_limits<float>::lowest());
-	model_.min = glm::vec3(std::numeric_limits<float>::max());
-
-	float normal[3];
-	using Triangle = std::array<float, 3 * 3>;
-	Triangle triangleData;
-	uint16_t attributes = 0;
-
-	std::vector<float> frontBufData;
-	std::vector<float> backBufData;
-	std::vector<float> vertBufData;
-	frontBufData.reserve(MaxTrianglesPerBuffer * triangleData.size());
-	backBufData.reserve(MaxTrianglesPerBuffer * triangleData.size());
-	vertBufData.reserve(MaxTrianglesPerBuffer * triangleData.size());
-
-	auto updateBuffers = [](std::vector<float>& bufData, std::vector<GLuint>& buffers, bool force) {
-		if (bufData.size() == bufData.capacity() || (force && bufData.size() > 0))
-		{
-			GLuint glBuffer = 0;
-			glGenBuffers(1, &glBuffer);
-			glBindBuffer(GL_ARRAY_BUFFER, glBuffer);
-			glBufferData(GL_ARRAY_BUFFER, bufData.size() * sizeof(bufData[0]), bufData.data(), GL_STATIC_DRAW);
-			bufData.clear();
-			buffers.push_back(glBuffer);
-		}
-	};
-	auto processTriangle = [&updateBuffers](const Triangle& triangleData, std::vector<float>& bufData, std::vector<GLuint>& buffers) {
-		bufData.insert(bufData.end(), std::begin(triangleData), std::end(triangleData));
-		updateBuffers(bufData, buffers, false);
-	};
-	
-	uint32_t numFront = 0;
-	uint32_t numBack = 0;
-	uint32_t numVertical = 0;
-
-	for (auto tri = 0u; tri < numTriangles; ++tri)
-	{
-		f.read(reinterpret_cast<char*>(normal), sizeof(normal));
-		f.read(reinterpret_cast<char*>(&triangleData[0]), sizeof(triangleData));
-		f.read(reinterpret_cast<char*>(&attributes), sizeof(attributes));
-
-		if (f.fail() || f.bad() || f.eof())
-		{
-			throw std::runtime_error("STL file is corrupted");
-		}
-
-		model_.min = glm::min(model_.min,
-			glm::vec3(triangleData[0], triangleData[1], triangleData[2]));
-
-		model_.min = glm::min(model_.min,
-			glm::vec3(triangleData[3], triangleData[4], triangleData[5]));
-
-		model_.min = glm::min(model_.min,
-			glm::vec3(triangleData[6], triangleData[7], triangleData[8]));
-
-
-		model_.max = glm::max(model_.max,
-			glm::vec3(triangleData[0], triangleData[1], triangleData[2]));
-
-		model_.max = glm::max(model_.max,
-			glm::vec3(triangleData[3], triangleData[4], triangleData[5]));
-
-		model_.max = glm::max(model_.max,
-			glm::vec3(triangleData[6], triangleData[7], triangleData[8]));
-
-		auto e1x = triangleData[1 * 3 + 0] - triangleData[0 * 3 + 0];
-		auto e1y = triangleData[1 * 3 + 1] - triangleData[0 * 3 + 1];
-
-		auto e2x = triangleData[2 * 3 + 0] - triangleData[0 * 3 + 0];
-		auto e2y = triangleData[2 * 3 + 1] - triangleData[0 * 3 + 1];
-
-		auto normalZ = e1x*e2y - e1y*e2x;
-		
-		if (normalZ < 0.0f)
-		{
-			processTriangle(triangleData, frontBufData, glData_.vBuffersFront);
-			++numFront;
-		}
-		else if (normalZ > 0.0f)
-		{
-			processTriangle(triangleData, backBufData, glData_.vBuffersBack);
-			++numBack;
-		}
-		else
-		{
-			processTriangle(triangleData, vertBufData, glData_.vBuffersVertical);
-			++numVertical;
-		}
-
-		//model_.geometry.insert(model_.geometry.end(), triangleData.begin(), triangleData.end());
-	}
-
-	updateBuffers(frontBufData, glData_.vBuffersFront, true);
-	updateBuffers(backBufData, glData_.vBuffersBack, true);
-	updateBuffers(vertBufData, glData_.vBuffersVertical, true);
-
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	
-	std::cout << "Front facing: " << numFront << std::endl;
-	std::cout << "Back facing: " << numBack << std::endl;
-	std::cout << "Vertical: " << numVertical << std::endl;
-
-	assert(numTriangles == (numFront + numBack + numVertical));
-
-	model_.pos = model_.min.z;
-	auto extent = model_.max - model_.min;
-
-	if (extent.x > settings_.plateWidth || extent.y > settings_.plateHeight)
-	{
-		std::stringstream s;
-		s << "Model [" << extent.x << ", " << extent.y << "] is larger than platform ["
-			<< settings_.plateWidth << ", " << settings_.plateHeight << "]";
-		throw std::runtime_error(s.str());
-	}
-
-	std::cout << "Total layers: " << GetLayersCount() << std::endl;
-	model_.numFront = numFront;
-	model_.numBack = numBack;
-	model_.numVertical = numVertical;
-
-	/*struct Key
-	{
-		uint64_t low;
-		uint32_t high;
-
-		bool operator==(const Key& k) const
-		{
-			return k.low == low && k.high == high;
-		}
-	};
-	auto& KeyHash = [](const Key& k) { return std::hash<decltype(k.high)>()(k.high) ^ std::hash<decltype(k.low)>()(k.low);  };
-	std::unordered_map<Key, uint32_t, decltype(KeyHash)> vertMerge(numTriangles, KeyHash);
-
-	std::vector<uint32_t> indexBuffer;
-	Key key;
-	for (auto i = 0ull, s = model_.geometry.size(); i < s; i += 9)
-	{
-		key.low = *reinterpret_cast<uint32_t*>(&model_.geometry[i + 0]);
-		key.low = key.low << 32 | *reinterpret_cast<uint32_t*>(&model_.geometry[i + 1]);
-		key.high = *reinterpret_cast<uint32_t*>(&model_.geometry[i + 2]);
-		auto result = vertMerge.insert(std::make_pair(key, static_cast<uint32_t>(vertMerge.size())));
-		indexBuffer.push_back(result.first->second);
-
-		key.low = *reinterpret_cast<uint32_t*>(&model_.geometry[i + 3]);
-		key.low = key.low << 32 | *reinterpret_cast<uint32_t*>(&model_.geometry[i + 4]);
-		key.high = *reinterpret_cast<uint32_t*>(&model_.geometry[i + 5]);
-		result = vertMerge.insert(std::make_pair(key, static_cast<uint32_t>(vertMerge.size())));
-		indexBuffer.push_back(result.first->second);
-
-		key.low = *reinterpret_cast<uint32_t*>(&model_.geometry[i + 6]);
-		key.low = key.low << 32 | *reinterpret_cast<uint32_t*>(&model_.geometry[i + 7]);
-		key.high = *reinterpret_cast<uint32_t*>(&model_.geometry[i + 8]);
-		result = vertMerge.insert(std::make_pair(key, static_cast<uint32_t>(vertMerge.size())));
-		indexBuffer.push_back(result.first->second);
-	}
-	std::cout << "Merged verts: " << vertMerge.size() << std::endl;
-
-	struct IndexedTri
-	{
-		uint32_t idx[3];
-	};
-
-	IndexedTri * begin = reinterpret_cast<IndexedTri*>(indexBuffer.data());
-	IndexedTri * end = begin + numTriangles;
-	uint32_t low, high;
-
-	const auto BatchSize = 65530;
-	auto sum = 0ull, sum2 = 0ull;
-	for (auto i = 0u; i < vertMerge.size(); i += BatchSize)
-	{
-		low = i;
-		high = i + BatchSize;
-		auto batch = std::count_if(begin, end, [low, high](const IndexedTri& tri){
-			return tri.idx[0] >= low && tri.idx[1] >= low && tri.idx[2] >= low &&
-				tri.idx[0] < high && tri.idx[1] < high && tri.idx[2] < high;
-		});
-		auto batch2 = std::count_if(begin, end, [low, high](const IndexedTri& tri){
-			return (tri.idx[0] >= low && tri.idx[1] >= low && tri.idx[0] < high && tri.idx[1] < high) ||
-				(tri.idx[1] >= low && tri.idx[2] >= low && tri.idx[1] < high && tri.idx[2] < high) ||
-				(tri.idx[0] >= low && tri.idx[2] >= low && tri.idx[0] < high && tri.idx[2] < high);
-		});
-		sum += batch;
-		sum2 += batch2-batch;
-	}
-	std::cout << "Tris not in batches: " << numTriangles - sum << std::endl;
-	std::cout << "Excessive verts to add: " << sum2 << std::endl;*/
-}
-
-void Renderer::LoadObj(const std::string& file, std::vector<float>& vb, std::vector<int>& ib)
-{
-	std::fstream f(file, std::ios::in);
-	if (f.fail() || f.bad())
-	{
-		throw std::runtime_error(strerror(errno));
-	}
-
-	std::string type;
-	std::string line;
-	std::string ind;
-
-	while (!f.eof())
-	{
-		std::getline(f, line);
-
-		std::istringstream s(line);
-		s >> type;
-		if (!type.length())
-		{
-			continue;
-		}
-		if (type == "v")
-		{
-			float x, y, z;
-			s >> x >> y >> z;
-			vb.push_back(x);
-			vb.push_back(y);
-			vb.push_back(z);
-		}
-		else if (type == "f")
-		{
-			s >> ind;
-			ib.push_back(std::stoi(ind));
-			s >> ind;
-			ib.push_back(std::stoi(ind));
-			s >> ind;
-			ib.push_back(std::stoi(ind));
-		}
-	}
-}
 
 void Renderer::LoadMasks()
 {
@@ -1208,7 +1031,7 @@ void Renderer::LoadMasks()
 
 			if (bitsPerPixel != 24)
 			{
-				throw std::runtime_error("Only support 8 bit per channel RGB (no alpha) PNG files");
+				throw std::runtime_error("Only support 8 bit per channel RGB (no alpha) PNG files for mask");
 			}
 
 			glBindTexture(GL_TEXTURE_2D, glData_.machineMaskTexture[i]);
@@ -1219,199 +1042,6 @@ void Renderer::LoadMasks()
 	}
 
 	glBindTexture(GL_TEXTURE_2D, 0);
-}
-
-std::vector<uint8_t> ReadPng(const std::string& fileName, uint32_t& width, uint32_t& height, uint32_t& bitsPerPixel)
-{
-	FILE* fp = nullptr;
-	png_structp png_ptr = nullptr;
-	png_infop info_ptr = nullptr;
-
-	try
-	{
-		unsigned char header[8];    // 8 is the maximum size that can be checked
-
-		/* open file and test for it being a png */
-		fp = fopen(fileName.c_str(), "rb");
-		if (!fp)
-			throw std::runtime_error("PNG file could not be opened for reading");
-
-		fread(header, 1, sizeof(header), fp);
-		if (png_sig_cmp(header, 0, 8))
-			throw std::runtime_error("File is not recognized as a PNG file");
-
-
-		/* initialize stuff */
-		png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-
-		if (!png_ptr)
-			throw std::runtime_error("png_create_read_struct failed");
-
-		info_ptr = png_create_info_struct(png_ptr);
-		if (!info_ptr)
-			throw std::runtime_error("png_create_info_struct failed");
-
-		if (setjmp(png_jmpbuf(png_ptr)))
-			throw std::runtime_error("Error during init_io");
-
-		png_init_io(png_ptr, fp);
-		png_set_sig_bytes(png_ptr, 8);
-
-		png_read_info(png_ptr, info_ptr);
-
-		auto png_width = png_get_image_width(png_ptr, info_ptr);
-		auto png_height = png_get_image_height(png_ptr, info_ptr);
-		auto color_type = png_get_color_type(png_ptr, info_ptr);
-		auto channel_depth = png_get_bit_depth(png_ptr, info_ptr);
-
-		/*auto number_of_passes = */png_set_interlace_handling(png_ptr);
-		png_read_update_info(png_ptr, info_ptr);
-
-		/* read file */
-		if (setjmp(png_jmpbuf(png_ptr)))
-			throw std::runtime_error("Error during read_image");
-
-		auto channels = 0;
-		switch (color_type)
-		{
-		case PNG_COLOR_TYPE_RGB:
-			channels = 3;
-			break;
-		case PNG_COLOR_TYPE_RGBA:
-			channels = 4;
-			break;
-		default:
-			throw std::runtime_error("PNG reader: can only read RGB or RGBA files");
-		}
-
-		std::vector<uint8_t> data;
-		std::vector<uint8_t*> rowPointers;
-
-		const auto pixelRowByteSize = png_width * channel_depth * channels / 8;
-		data.resize(pixelRowByteSize * png_height);
-		rowPointers.resize(png_height);
-		for (auto y = 0u; y < png_height; ++y)
-		{
-			rowPointers[y] = &data[0] + y * pixelRowByteSize;
-		}
-
-		png_read_image(png_ptr, &rowPointers[0]);
-		fclose(fp);
-		fp = nullptr;
-
-		width = png_width;
-		height = png_height;
-		bitsPerPixel = channel_depth * channels;
-		return data;
-	}
-	catch(const std::exception&)
-	{
-		if (fp)
-		{
-			fclose(fp);
-		}
-
-		if (png_ptr || info_ptr)
-		{
-			png_destroy_write_struct(&png_ptr, &info_ptr);
-		}
-
-		throw;
-	}
-}
-
-void WritePng(const std::string& fileName, uint32_t width, uint32_t height, const std::vector<uint8_t>& pixData)
-{
-	const auto ChannelBitDepth = 8;
-
-	FILE *fp = nullptr;
-	png_structp png_ptr = nullptr;
-	png_infop info_ptr = nullptr;
-	try
-	{
-		/* create file */
-		fp = fopen(fileName.c_str(), "wb");
-		if (!fp)
-			throw std::runtime_error("Can't create png file");
-
-		/* initialize stuff */
-		png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-		if (!png_ptr)
-			throw std::runtime_error("png_create_write_struct failed");
-
-		info_ptr = png_create_info_struct(png_ptr);
-		if (!info_ptr)
-			throw std::runtime_error("png_create_info_struct failed");
-
-		if (setjmp(png_jmpbuf(png_ptr)))
-			throw std::runtime_error("Error during init_io");
-
-		png_init_io(png_ptr, fp);
-
-		/* write header */
-		if (setjmp(png_jmpbuf(png_ptr)))
-			throw std::runtime_error("Error during writing header");
-
-		auto nChannels = pixData.size() / (width * height);
-		auto color_type = 0;
-		switch (nChannels)
-		{
-		case 1:
-			color_type = PNG_COLOR_TYPE_GRAY;
-			break;
-		case 3:
-			color_type = PNG_COLOR_TYPE_RGB;
-			break;
-		case 4:
-			color_type = PNG_COLOR_TYPE_RGBA;
-			break;
-		default:
-			throw std::runtime_error("Can only write 1, 3 or 4 channel PNG");
-		}
-
-		png_set_IHDR(png_ptr, info_ptr, width, height,
-					ChannelBitDepth, color_type, PNG_INTERLACE_NONE,
-					PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
-
-		png_write_info(png_ptr, info_ptr);
-
-
-		/* write bytes */
-		if (setjmp(png_jmpbuf(png_ptr)))
-			throw std::runtime_error("Error during writing bytes");
-
-		std::vector<const uint8_t*> row_pointers(height);
-		for (auto i = 0u; i < height; ++i)
-		{
-			row_pointers[i] = &pixData[width * nChannels * i];
-		}
-
-		png_write_image(png_ptr, const_cast<uint8_t**>(&row_pointers[0]));
-
-
-		/* end write */
-		if (setjmp(png_jmpbuf(png_ptr)))
-			throw std::runtime_error("[write_png_file] Error during end of write");
-
-		png_write_end(png_ptr, NULL);
-		png_destroy_write_struct(&png_ptr, &info_ptr);
-		fclose(fp);
-		fp = nullptr;
-	}
-	catch (const std::exception&)
-	{
-		if (fp)
-		{
-			fclose(fp);
-		}
-
-		if (png_ptr || info_ptr)
-		{
-			png_destroy_write_struct(&png_ptr, &info_ptr);
-		}
-
-		throw;
-	}
 }
 
 std::string glErrorString(GLenum err)
