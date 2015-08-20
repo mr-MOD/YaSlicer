@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cerrno>
+#include <cstring>
 
 struct Key
 {
