@@ -35,7 +35,8 @@ public:
 	std::pair<V, bool> insert(const std::pair<K, V>& val)
 	{
 		auto& bucket = buckets_[hash(val.first) % buckets_.size()];
-		for (auto& el : bucket)
+
+		for (auto& el : bucket.storage)
 		{
 			if (el.first == val.first)
 			{
@@ -43,11 +44,15 @@ public:
 			}
 		}
 
-		bucket.push_back(val);
+		bucket.storage.push_back(val);
 		return std::make_pair(val.second, true);
 	}
 private:
-	std::vector<std::vector<std::pair<K,V>>> buckets_;
+	struct Bucket
+	{
+		std::vector<std::pair<K, V>> storage;
+	};
+	std::vector<Bucket> buckets_;
 };
 
 
@@ -65,51 +70,68 @@ void LoadStl(const std::string& file, std::vector<float>& vb, std::vector<uint32
 	uint32_t numTriangles = 0;
 	f.read(reinterpret_cast<char*>(&numTriangles), sizeof(numTriangles));
 
-	float normal[3];
-	using Triangle = std::array<float, 3 * 3>;
-	Triangle triangleData;
-	uint16_t attributes = 0;
+	HashMerger<Key, uint32_t> vertMerge(std::max(1000u, numTriangles / 100));
 
-	HashMerger<Key, uint32_t> vertMerge(1000 * 1000);
+#pragma pack(push, 1)
+	struct StlTriangle
+	{
+		float normal[3];
+		float vtx0[3];
+		float vtx1[3];
+		float vtx2[3];
+		uint16_t attributes;
+	};
+#pragma pack(pop)
+
+	static_assert(sizeof(StlTriangle) == 50, "check alignment settings");
+
+	const auto ReadBufferSize = 100 * 1000;
+	std::vector<StlTriangle> readBuffer;
+	readBuffer.reserve(ReadBufferSize);
 
 	std::vector<uint32_t> indexBuffer;
 	indexBuffer.reserve(numTriangles * 3);
 	std::vector<float> vertexBuffer;
 	vertexBuffer.reserve(numTriangles * 3);
-	for (auto tri = 0u; tri < numTriangles; ++tri)
-	{
-		f.read(reinterpret_cast<char*>(normal), sizeof(normal));
-		f.read(reinterpret_cast<char*>(&triangleData[0]), sizeof(triangleData));
-		f.read(reinterpret_cast<char*>(&attributes), sizeof(attributes));
 
+	for (auto triRead = 0u; triRead < numTriangles;)
+	{
+		auto trianglesToRead = std::min<uint32_t>(ReadBufferSize, numTriangles - triRead);
+		readBuffer.resize(trianglesToRead);
+		f.read(reinterpret_cast<char*>(readBuffer.data()), trianglesToRead*sizeof(StlTriangle));
 		if (f.fail() || f.bad() || f.eof())
 		{
 			throw std::runtime_error("STL file is corrupted");
 		}
-
-		auto result = vertMerge.insert(
-			std::make_pair(Key(triangleData[0], triangleData[1], triangleData[2]), static_cast<uint32_t>(vertexBuffer.size() / 3)));
-		if (result.second)
+		triRead += trianglesToRead;
+		
+		for (auto it = readBuffer.begin(); it != readBuffer.end(); ++it)
 		{
-			vertexBuffer.insert(vertexBuffer.end(), triangleData.begin(), triangleData.begin() + 3);
-		}
-		indexBuffer.push_back(result.first);
+			const auto& tri = *it;
+			auto result = vertMerge.insert(
+				std::make_pair(Key(tri.vtx0[0], tri.vtx0[1], tri.vtx0[2]), static_cast<uint32_t>(vertexBuffer.size() / 3)));
+			if (result.second)
+			{
+				vertexBuffer.insert(vertexBuffer.end(), std::begin(tri.vtx0), std::end(tri.vtx0));
+			}
+			indexBuffer.push_back(result.first);
 
-		result = vertMerge.insert(
-			std::make_pair(Key(triangleData[3], triangleData[4], triangleData[5]), static_cast<uint32_t>(vertexBuffer.size() / 3)));
-		if (result.second)
-		{
-			vertexBuffer.insert(vertexBuffer.end(), triangleData.begin() + 3, triangleData.begin() + 6);
-		}
-		indexBuffer.push_back(result.first);
+			result = vertMerge.insert(
+				std::make_pair(Key(tri.vtx1[0], tri.vtx1[1], tri.vtx1[2]), static_cast<uint32_t>(vertexBuffer.size() / 3)));
+			if (result.second)
+			{
+				vertexBuffer.insert(vertexBuffer.end(), std::begin(tri.vtx1), std::end(tri.vtx1));
+			}
+			indexBuffer.push_back(result.first);
 
-		result = vertMerge.insert(
-			std::make_pair(Key(triangleData[6], triangleData[7], triangleData[8]), static_cast<uint32_t>(vertexBuffer.size() / 3)));
-		if (result.second)
-		{
-			vertexBuffer.insert(vertexBuffer.end(), triangleData.begin() + 6, triangleData.begin() + 9);
+			result = vertMerge.insert(
+				std::make_pair(Key(tri.vtx2[0], tri.vtx2[1], tri.vtx2[2]), static_cast<uint32_t>(vertexBuffer.size() / 3)));
+			if (result.second)
+			{
+				vertexBuffer.insert(vertexBuffer.end(), std::begin(tri.vtx2), std::end(tri.vtx2));
+			}
+			indexBuffer.push_back(result.first);	
 		}
-		indexBuffer.push_back(result.first);
 	}
 
 	vertexBuffer.swap(vb);

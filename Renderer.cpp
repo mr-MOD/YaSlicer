@@ -18,7 +18,6 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-
 #include <thread>
 #include <cerrno>
 
@@ -629,19 +628,6 @@ settings_(settings), curMask_(0)
 		triData.backFacing = static_cast<GLsizei>(std::distance(orthoEndIt, triEnd) * 3);
 
 		std::vector<uint16_t>& ib16Opt = ib16;
-		/*std::vector<uint16_t> ib16Opt(ib16.size());
-		Forsyth::OptimizeFaces(ib16.data(),
-			static_cast<uint32_t>(triData.frontFacing),
-			static_cast<uint32_t>(vb.size() / 3),
-			ib16Opt.data(), VertexCacheSize);
-		Forsyth::OptimizeFaces(ib16.data() + triData.frontFacing,
-			static_cast<uint32_t>(triData.orthoFacing),
-			static_cast<uint32_t>(vb.size() / 3),
-			ib16Opt.data() + triData.frontFacing, VertexCacheSize);
-		Forsyth::OptimizeFaces(ib16.data() + triData.frontFacing + triData.orthoFacing,
-			static_cast<uint32_t>(triData.backFacing),
-			static_cast<uint32_t>(vb.size() / 3),
-			ib16Opt.data() + triData.frontFacing + triData.orthoFacing, VertexCacheSize);*/
 
 		GLuint buffers[2];
 		glGenBuffers(2, buffers);
