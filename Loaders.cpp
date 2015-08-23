@@ -180,3 +180,65 @@ void LoadObj(const std::string& file, std::vector<float>& vb, std::vector<uint32
 		}
 	}
 }
+
+void LoadMesh(const std::string& file,
+	const std::function<void(const std::vector<float>&, const std::vector<uint16_t>&, uint32_t, uint32_t, uint32_t)>& onMesh)
+{
+	std::fstream f(file, std::ios::in | std::ios::binary);
+	if (f.fail() || f.bad())
+	{
+		throw std::runtime_error(strerror(errno));
+	}
+
+#pragma pack(push, 1)
+	struct ChunkHeader
+	{
+		uint32_t vbSize;
+		uint32_t ibSize;
+		uint32_t frontFacingCount;
+		uint32_t orthoFacingCount;
+		uint32_t backFacingCount;
+	};
+#pragma pack(pop)
+
+	ChunkHeader header;
+	std::vector<float> vb;
+	std::vector<uint16_t> ib;
+	auto chunk = 0;
+	while (f.read(reinterpret_cast<char*>(&header), sizeof(header)))
+	{
+		vb.resize(header.vbSize);
+		ib.resize(header.ibSize);
+
+		f.read(reinterpret_cast<char*>(vb.data()), vb.size()*sizeof(vb[0]));
+		f.read(reinterpret_cast<char*>(ib.data()), ib.size()*sizeof(ib[0]));
+
+		onMesh(vb, ib, header.frontFacingCount, header.orthoFacingCount, header.backFacingCount);
+	}
+}
+
+FileType GetFileType(const std::string& file)
+{
+	std::string fileLowerCase;
+	std::transform(file.begin(), file.end(), std::back_inserter(fileLowerCase), tolower);
+
+	auto dotPos = fileLowerCase.find_last_of('.');
+	if (dotPos == std::string::npos || (dotPos + 1) == fileLowerCase.length())
+		return FileType::Unknown;
+
+	auto extension = fileLowerCase.substr(dotPos + 1);
+	if (extension == "stl")
+	{
+		return FileType::Stl;
+	}
+	else if (extension == "obj")
+	{
+		return FileType::Obj;
+	}
+	else if (extension == "mesh")
+	{
+		return FileType::Mesh;
+	}
+
+	return FileType::Unknown;
+}

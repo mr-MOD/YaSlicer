@@ -137,7 +137,9 @@ public:
 	void SetMask(uint32_t n);
 
 private:
-	
+	void CreateGeometryBuffers();
+	void LoadModel(const std::function<void(
+		const std::vector<float>&, const std::vector<uint16_t>&, uint32_t, uint32_t, uint32_t)>& onMesh);
 	void LoadMasks();
 	
 	uint32_t GetLayersCount() const;

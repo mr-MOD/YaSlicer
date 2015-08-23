@@ -564,45 +564,61 @@ settings_(settings), curMask_(0)
 
 	glHint(GL_GENERATE_MIPMAP_HINT, GL_NICEST);
 
+	CreateGeometryBuffers();
+	LoadMasks();
+}
+
+Renderer::~Renderer()
+{
+#ifdef WIN32
+	for (auto& v : pngSaveResult_)
+	{
+		v.get();
+	}
+#endif // WIN32
+}
+
+void Renderer::LoadModel(const std::function<void(
+	const std::vector<float>&, const std::vector<uint16_t>&, uint32_t, uint32_t, uint32_t)>& onMesh)
+{
+	const auto fileType = GetFileType(settings_.stlFile);
+
 	std::vector<float> vb;
 	std::vector<uint32_t> ib;
-	LoadStl(settings_.stlFile, vb, ib);
 
-	auto geometryBytes = vb.size()*sizeof(vb[0]) + ib.size()*sizeof(uint16_t);
-	auto surfaceBytes = settings_.renderWidth*settings_.renderHeight * 4 * 2;
-	std::cout << "This model requires at least " << (geometryBytes + surfaceBytes) / (1024 * 1024) << " megabytes VRAM" << std::endl;
-	
-	model_.min.x = model_.min.y = model_.min.z = std::numeric_limits<float>::max();
-	model_.max.x = model_.max.y = model_.max.z = std::numeric_limits<float>::lowest();
-	for (auto i = 0u; i < vb.size(); i += 3)
+	switch (fileType)
 	{
-		model_.min.x = std::min(model_.min.x, vb[i + 0]);
-		model_.min.y = std::min(model_.min.y, vb[i + 1]);
-		model_.min.z = std::min(model_.min.z, vb[i + 2]);
-
-		model_.max.x = std::max(model_.max.x, vb[i + 0]);
-		model_.max.y = std::max(model_.max.y, vb[i + 1]);
-		model_.max.z = std::max(model_.max.z, vb[i + 2]);
+	case FileType::Mesh:
+		LoadMesh(settings_.stlFile, onMesh);
+		return;
+		break;
+	case FileType::Stl:
+		LoadStl(settings_.stlFile, vb, ib);
+		break;
+	case FileType::Obj:
+		LoadStl(settings_.stlFile, vb, ib);
+		break;
+	default:
+		throw std::runtime_error("Unknown model file format");
 	}
-	model_.pos = model_.min.z;
 
 	size_t optimizedVerts = 0;
 	size_t totalTris = ib.size() / 3;
 
+	std::string outFileName = settings_.stlFile + ".mesh";
+	std::fstream outFile(outFileName, std::ios::out | std::ios::binary);
+
 	const auto MaxVertCount = std::numeric_limits<uint16_t>::max();
-	SplitMesh(vb, ib, MaxVertCount, [this, &optimizedVerts](const std::vector<float>& vb, const std::vector<uint32_t>& ib) {
+	SplitMesh(vb, ib, MaxVertCount, [this, &optimizedVerts, &outFile, &onMesh](const std::vector<float>& vb, const std::vector<uint32_t>& ib) {
 		optimizedVerts += vb.size() / 3;
 
-		auto VertexCacheSize = 32;
-		GLData::TriangleData triData;
-		
 		std::vector<uint16_t> ib16;
 		ib16.assign(ib.begin(), ib.end());
 
 		typedef std::array<uint16_t, 3> Triangle;
 
 		auto triBegin = reinterpret_cast<Triangle*>(ib16.data());
-		auto triEnd = triBegin + ib16.size()/3;
+		auto triEnd = triBegin + ib16.size() / 3;
 
 		auto frontEndIt = std::partition(triBegin, triEnd, [&vb](const Triangle& tri) {
 			auto e1x = vb[tri[1] * 3 + 0] - vb[tri[0] * 3 + 0];
@@ -623,11 +639,46 @@ settings_(settings), curMask_(0)
 			return nz == 0;
 		});
 
-		triData.frontFacing = static_cast<GLsizei>(std::distance(triBegin, frontEndIt) * 3);
-		triData.orthoFacing = static_cast<GLsizei>(std::distance(frontEndIt, orthoEndIt) * 3);
-		triData.backFacing = static_cast<GLsizei>(std::distance(orthoEndIt, triEnd) * 3);
+		auto frontFacing = static_cast<uint32_t>(std::distance(triBegin, frontEndIt) * 3);
+		auto orthoFacing = static_cast<uint32_t>(std::distance(frontEndIt, orthoEndIt) * 3);
+		auto backFacing = static_cast<uint32_t>(std::distance(orthoEndIt, triEnd) * 3);
 
+		auto VertexCacheSize = 32;
 		std::vector<uint16_t>& ib16Opt = ib16;
+		/*ib16Opt.resize(ib16.size());
+		Forsyth::OptimizeFaces(ib16.data(), frontFacing,
+			static_cast<uint32_t>(vb.size()), ib16Opt.data(), VertexCacheSize);
+		Forsyth::OptimizeFaces(ib16.data() + frontFacing + orthoFacing, backFacing,
+			static_cast<uint32_t>(vb.size()), ib16Opt.data() + frontFacing + orthoFacing, VertexCacheSize);*/
+
+		onMesh(vb, ib16Opt, frontFacing, orthoFacing, backFacing);
+
+		uint32_t vbSize = static_cast<uint32_t>(vb.size());
+		uint32_t ibSize = static_cast<uint32_t>(ib16Opt.size());
+
+		outFile.write(reinterpret_cast<const char*>(&vbSize), sizeof(vbSize));
+		outFile.write(reinterpret_cast<const char*>(&ibSize), sizeof(ibSize));
+		outFile.write(reinterpret_cast<const char*>(&frontFacing), sizeof(frontFacing));
+		outFile.write(reinterpret_cast<const char*>(&orthoFacing), sizeof(orthoFacing));
+		outFile.write(reinterpret_cast<const char*>(&backFacing), sizeof(backFacing));
+		outFile.write(reinterpret_cast<const char*>(vb.data()), vb.size()*sizeof(vb[0]));
+		outFile.write(reinterpret_cast<const char*>(ib16Opt.data()), ib16Opt.size()*sizeof(ib16Opt[0]));
+	});
+
+	std::cout
+		<< "Source vertices: " << totalTris * 3 << "\n"
+		<< "Optimized verts: " << optimizedVerts << "\n"
+		<< "Total triangles: " << totalTris << std::endl;
+}
+
+void Renderer::CreateGeometryBuffers()
+{
+	model_.min.x = model_.min.y = model_.min.z = std::numeric_limits<float>::max();
+	model_.max.x = model_.max.y = model_.max.z = std::numeric_limits<float>::lowest();
+
+	LoadModel([this](const std::vector<float>& vb, const std::vector<uint16_t>& ib, uint32_t front, uint32_t ortho, uint32_t back) {
+
+		GLData::TriangleData triData(front, ortho, back);
 
 		GLuint buffers[2];
 		glGenBuffers(2, buffers);
@@ -636,28 +687,24 @@ settings_(settings), curMask_(0)
 		glBufferData(GL_ARRAY_BUFFER, vb.size() * sizeof(vb[0]), vb.data(), GL_STATIC_DRAW);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[1]);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, ib16Opt.size() * sizeof(ib16Opt[0]), ib16Opt.data(), GL_STATIC_DRAW);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, ib.size() * sizeof(ib[0]), ib.data(), GL_STATIC_DRAW);
 
 		this->glData_.vBuffers.push_back(buffers[0]);
 		this->glData_.iBuffers.push_back(buffers[1]);
 		this->glData_.iCount.push_back(triData);
+
+		for (auto i = 0u; i < vb.size(); i += 3)
+		{
+			model_.min.x = std::min(model_.min.x, vb[i + 0]);
+			model_.min.y = std::min(model_.min.y, vb[i + 1]);
+			model_.min.z = std::min(model_.min.z, vb[i + 2]);
+
+			model_.max.x = std::max(model_.max.x, vb[i + 0]);
+			model_.max.y = std::max(model_.max.y, vb[i + 1]);
+			model_.max.z = std::max(model_.max.z, vb[i + 2]);
+		}
 	});
-
-	std::cout
-		<< "Source vertices: " << totalTris*3 << "\n"
-		<< "Optimized verts: " << optimizedVerts << "\n"
-		<< "Total triangles: " << totalTris << std::endl;
-	LoadMasks();
-}
-
-Renderer::~Renderer()
-{
-#ifdef WIN32
-	for (auto& v : pngSaveResult_)
-	{
-		v.get();
-	}
-#endif // WIN32
+	model_.pos = model_.min.z;
 }
 
 uint32_t Renderer::GetLayersCount() const
