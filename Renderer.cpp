@@ -36,6 +36,7 @@ const auto MaxTrianglesPerBuffer = 32000u;
 const auto MaxTrianglesPerBuffer = 4u * 1000u * 1000u;
 #endif
 
+const auto MaxVerticesPerBuffer = 32000; // Raspberry Pi max
 const auto FBOBytesPerPixel = 4;
 const auto PNGBytesPerPixel = 1;
 
@@ -607,8 +608,10 @@ void Renderer::LoadModel(const std::function<void(
 
 	std::string outFileName = settings_.stlFile + ".mesh";
 	std::fstream outFile(outFileName, std::ios::out | std::ios::binary);
+	MeshHeader meshHeader;
+	outFile.write(reinterpret_cast<const char*>(&meshHeader), sizeof(meshHeader));
 
-	const auto MaxVertCount = std::numeric_limits<uint16_t>::max();
+	const auto MaxVertCount = MaxVerticesPerBuffer;
 	SplitMesh(vb, ib, MaxVertCount, [this, &optimizedVerts, &outFile, &onMesh](const std::vector<float>& vb, const std::vector<uint32_t>& ib) {
 		optimizedVerts += vb.size() / 3;
 
@@ -643,18 +646,22 @@ void Renderer::LoadModel(const std::function<void(
 		auto orthoFacing = static_cast<uint32_t>(std::distance(frontEndIt, orthoEndIt) * 3);
 		auto backFacing = static_cast<uint32_t>(std::distance(orthoEndIt, triEnd) * 3);
 
-		auto VertexCacheSize = 32;
-		std::vector<uint16_t>& ib16Opt = ib16;
-		/*ib16Opt.resize(ib16.size());
-		Forsyth::OptimizeFaces(ib16.data(), frontFacing,
-			static_cast<uint32_t>(vb.size()), ib16Opt.data(), VertexCacheSize);
-		Forsyth::OptimizeFaces(ib16.data() + frontFacing + orthoFacing, backFacing,
-			static_cast<uint32_t>(vb.size()), ib16Opt.data() + frontFacing + orthoFacing, VertexCacheSize);*/
+		if (settings_.optimizeMesh)
+		{
+			auto VertexCacheSize = 32;
+			std::vector<uint16_t> ib16Copy = ib16;
+			ib16Copy.resize(ib16.size());
+			Forsyth::OptimizeFaces(ib16Copy.data(), frontFacing,
+				static_cast<uint32_t>(vb.size() / 3), ib16.data(), VertexCacheSize);
+			Forsyth::OptimizeFaces(ib16Copy.data() + frontFacing + orthoFacing, backFacing,
+				static_cast<uint32_t>(vb.size() / 3), ib16.data() + frontFacing + orthoFacing, VertexCacheSize);
+		}
+		
 
-		onMesh(vb, ib16Opt, frontFacing, orthoFacing, backFacing);
+		onMesh(vb, ib16, frontFacing, orthoFacing, backFacing);
 
 		uint32_t vbSize = static_cast<uint32_t>(vb.size());
-		uint32_t ibSize = static_cast<uint32_t>(ib16Opt.size());
+		uint32_t ibSize = static_cast<uint32_t>(ib16.size());
 
 		outFile.write(reinterpret_cast<const char*>(&vbSize), sizeof(vbSize));
 		outFile.write(reinterpret_cast<const char*>(&ibSize), sizeof(ibSize));
@@ -662,7 +669,7 @@ void Renderer::LoadModel(const std::function<void(
 		outFile.write(reinterpret_cast<const char*>(&orthoFacing), sizeof(orthoFacing));
 		outFile.write(reinterpret_cast<const char*>(&backFacing), sizeof(backFacing));
 		outFile.write(reinterpret_cast<const char*>(vb.data()), vb.size()*sizeof(vb[0]));
-		outFile.write(reinterpret_cast<const char*>(ib16Opt.data()), ib16Opt.size()*sizeof(ib16Opt[0]));
+		outFile.write(reinterpret_cast<const char*>(ib16.data()), ib16.size()*sizeof(ib16[0]));
 	});
 
 	std::cout
@@ -705,6 +712,12 @@ void Renderer::CreateGeometryBuffers()
 		}
 	});
 	model_.pos = model_.min.z;
+
+	auto extent = model_.max - model_.min;
+	if (extent.x > settings_.plateWidth || extent.y > settings_.plateHeight)
+	{
+		throw std::runtime_error("Model is larger than platform");
+	}
 }
 
 uint32_t Renderer::GetLayersCount() const
@@ -852,7 +865,7 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 		glEnableVertexAttribArray(glData_.mainVertexPosAttrib);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glData_.iBuffers[i]);
-		glDrawElements(GL_TRIANGLES, glData_.iCount[i].frontFacing, GL_UNSIGNED_SHORT, nullptr);
+		glDrawElements(GL_TRIANGLES, glData_.iCount[i].frontFacing + glData_.iCount[i].orthoFacing, GL_UNSIGNED_SHORT, nullptr);
 	}
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);

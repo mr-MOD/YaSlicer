@@ -103,6 +103,10 @@ void ReadSetting(std::istream& s, const std::string& name, Settings& settings)
 	{
 		s >> settings.modelOffset;
 	}
+	else if (name == "optimizeMesh")
+	{
+		s >> settings.optimizeMesh;
+	}
 }
 
 void ReadSettings(std::istream& s, Settings& settings)
@@ -120,7 +124,11 @@ void RenderCommand(std::istream& s, Renderer& r)
 	std::string str;
 	s >> str;
 
-	if (str == "Black")
+	if (str == "NumLayers")
+	{
+		std::cout << r.GetLayersCount() << std::endl;
+	}
+	else if (str == "Black")
 	{
 		r.Black();
 	}
@@ -185,13 +193,11 @@ int main(int argc, char** argv)
 		std::cout << "Load: " << std::chrono::duration_cast<std::chrono::milliseconds>(tLoad - tStart).count() <<
 			" ms" << std::endl;
 #ifdef HAVE_LIBBCM_HOST
-		r.FirstSlice();
-		while (r.NextSlice()) {}
-		/*while (!std::cin.eof())
+		while (!std::cin.eof())
 		{
 			RenderCommand(std::cin, r);
 			std::cout << "done" << std::endl;
-		}*/
+		}
 #else
 
 		tStart = std::chrono::high_resolution_clock::now();

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cerrno>
 #include <cstring>
+#include <algorithm>
 
 struct Key
 {
@@ -190,30 +191,26 @@ void LoadMesh(const std::string& file,
 		throw std::runtime_error(strerror(errno));
 	}
 
-#pragma pack(push, 1)
-	struct ChunkHeader
+	MeshHeader header;
+	if (!f.read(reinterpret_cast<char*>(&header), sizeof(header)) ||
+		header.meshSignature != MeshSignature || header.meshVersion > MeshVersion)
 	{
-		uint32_t vbSize;
-		uint32_t ibSize;
-		uint32_t frontFacingCount;
-		uint32_t orthoFacingCount;
-		uint32_t backFacingCount;
-	};
-#pragma pack(pop)
+		throw std::runtime_error("Invalid mesh file");
+	}
 
-	ChunkHeader header;
+	MeshChunkHeader chunkHeader;
 	std::vector<float> vb;
 	std::vector<uint16_t> ib;
 	auto chunk = 0;
-	while (f.read(reinterpret_cast<char*>(&header), sizeof(header)))
+	while (f.read(reinterpret_cast<char*>(&chunkHeader), sizeof(chunkHeader)))
 	{
-		vb.resize(header.vbSize);
-		ib.resize(header.ibSize);
+		vb.resize(chunkHeader.vbSize);
+		ib.resize(chunkHeader.ibSize);
 
 		f.read(reinterpret_cast<char*>(vb.data()), vb.size()*sizeof(vb[0]));
 		f.read(reinterpret_cast<char*>(ib.data()), ib.size()*sizeof(ib[0]));
 
-		onMesh(vb, ib, header.frontFacingCount, header.orthoFacingCount, header.backFacingCount);
+		onMesh(vb, ib, chunkHeader.frontFacingCount, chunkHeader.orthoFacingCount, chunkHeader.backFacingCount);
 	}
 }
 

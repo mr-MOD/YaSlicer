@@ -66,11 +66,9 @@ void RemoveVbHoles(std::vector<float>& vb, std::vector<uint32_t>& ib)
 	vb.erase(eraseStart, vb.end());
 }
 
-void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, uint32_t maxVertsInBuffer,
+void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
 	const std::function<void(const std::vector<float>& vb, const std::vector<uint32_t>& ib)>& onMesh)
 {
-	const auto MaxVerticesPerBuffer = maxVertsInBuffer;
-
 	typedef std::array<uint32_t, 3> Triangle;
 
 	// make last triangle index max of 3
@@ -90,9 +88,9 @@ void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, uint32_t maxVe
 	});
 
 	std::vector<float> curVb;
-	curVb.reserve(MaxVerticesPerBuffer * 3);
+	curVb.reserve(maxVertsInBuffer * 3);
 	std::vector<uint32_t> curIb;
-	curIb.reserve(MaxVerticesPerBuffer * 3);
+	curIb.reserve(maxVertsInBuffer * 3);
 
 	while (true)
 	{
@@ -104,17 +102,42 @@ void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, uint32_t maxVe
 			break;
 		}
 
-		auto threeVertsRangeEndIt = std::partition(startIt, endIt, [MaxVerticesPerBuffer](const Triangle& tri) {
-			return tri[2] < MaxVerticesPerBuffer;
+		auto threeVertsRangeEndIt = std::partition(startIt, endIt, [maxVertsInBuffer](const Triangle& tri) {
+			return tri[2] < maxVertsInBuffer;
 		});
 
+		auto curStepIdxEnd = threeVertsRangeEndIt;
 		if (threeVertsRangeEndIt == startIt)
 		{
-			throw std::runtime_error("too complex mesh, can't split");
-		}
+			std::unordered_map<uint32_t, uint32_t> uniqueVertexCounter;
+			auto it = startIt;
+			for (; it < endIt && uniqueVertexCounter.size() <= maxVertsInBuffer - 3; ++it)
+			{
+				const auto tri = *it;
+				++uniqueVertexCounter[tri[0]];
+				++uniqueVertexCounter[tri[1]];
+				++uniqueVertexCounter[tri[2]];
+			}
 
-		curIb.assign(reinterpret_cast<uint32_t*>(startIt), reinterpret_cast<uint32_t*>(threeVertsRangeEndIt));
-		curVb.resize(MaxVerticesPerBuffer*3);
+			if (uniqueVertexCounter.empty())
+			{
+				throw std::runtime_error("too complex mesh, can't split");
+			}
+
+			auto maxIndex = std::max_element(uniqueVertexCounter.begin(), uniqueVertexCounter.end(),
+				[](const std::pair<uint32_t, uint32_t>& v1, const std::pair<uint32_t, uint32_t>& v2) {
+					return v1.first < v2.first;
+				})->first;
+
+			curStepIdxEnd = it;
+			curVb.resize((maxIndex+1) * 3);
+		}
+		else
+		{
+			curVb.resize(maxVertsInBuffer * 3);
+		}
+		
+		curIb.assign(reinterpret_cast<uint32_t*>(startIt), reinterpret_cast<uint32_t*>(curStepIdxEnd));
 		for (auto idx : curIb)
 		{
 			curVb[idx * 3 + 0] = vb[idx * 3 + 0];
@@ -125,7 +148,7 @@ void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, uint32_t maxVe
 		RemoveVbHoles(curVb, curIb);
 		onMesh(curVb, curIb);
 
-		auto idxCount = std::distance(startIt, threeVertsRangeEndIt) * 3;
+		auto idxCount = std::distance(startIt, curStepIdxEnd) * 3;
 		ib.erase(ib.begin(), ib.begin() + idxCount);
 		RemoveVbHoles(vb, ib);
 	}

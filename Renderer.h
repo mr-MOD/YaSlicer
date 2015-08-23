@@ -28,7 +28,7 @@ struct Settings
 	Settings() : step(0.025f), renderWidth(1920), renderHeight(1080), samples(0),
 		queue(std::max(1u, std::thread::hardware_concurrency())),
 		plateWidth(96.0f), plateHeight(54.0f), downScaleCount(0),
-		dilateCount(0), dilateSliceFactor(1), modelOffset(0.5f) {}
+		dilateCount(0), dilateSliceFactor(1), modelOffset(0.5f), optimizeMesh(true) {}
 
 	std::string stlFile;
 	std::array<std::string, 2> machineMaskFile;
@@ -50,6 +50,8 @@ struct Settings
 	uint32_t dilateCount;
 	uint32_t dilateSliceFactor;
 	float modelOffset;
+
+	bool optimizeMesh;
 };
 
 class Renderer
@@ -130,6 +132,7 @@ public:
 	void SavePng(const std::string& fileName);
 #endif // WIN32
 
+	uint32_t GetLayersCount() const;
 	void FirstSlice();
 	bool NextSlice();
 	void Black();
@@ -141,8 +144,6 @@ private:
 	void LoadModel(const std::function<void(
 		const std::vector<float>&, const std::vector<uint16_t>&, uint32_t, uint32_t, uint32_t)>& onMesh);
 	void LoadMasks();
-	
-	uint32_t GetLayersCount() const;
 
 	void Render();
 
