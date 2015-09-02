@@ -26,6 +26,21 @@
     <ClInclude Include="CacheOpt.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="GlContext.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GlContextANGLE.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GlContextRPi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GlContextX.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Raster.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Slicer.cpp">
@@ -44,6 +59,21 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CacheOpt.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GlContextANGLE.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GlContextRPi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GlContextX.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GlContext.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Raster.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

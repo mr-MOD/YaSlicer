@@ -8,12 +8,6 @@
 #include <thread>
 #include <chrono>
 
-#include <cstdio>
-
-#ifdef HAVE_LIBBCM_HOST
-#include <bcm_host.h>
-#endif
-
 std::string TrimLeft(const std::string& s)
 {
 	return std::string(std::find_if_not(s.begin(), s.end(), [](char c){ return c <= ' '; }), s.end());
@@ -33,10 +27,10 @@ std::string Trim(const std::string& s)
 
 void ReadSetting(std::istream& s, const std::string& name, Settings& settings)
 {
-	if (name == "stlFile")
+	if (name == "modelFile")
 	{
-		std::getline(s, settings.stlFile);
-		settings.stlFile = Trim(settings.stlFile);
+		std::getline(s, settings.modelFile);
+		settings.modelFile = Trim(settings.modelFile);
 	}
 	else if (name == "machineMaskFile1")
 	{
@@ -91,10 +85,6 @@ void ReadSetting(std::istream& s, const std::string& name, Settings& settings)
 	{
 		s >> settings.dilateCount;
 	}
-	else if (name == "downScaleCount")
-	{
-		s >> settings.downScaleCount;
-	}
 	else if (name == "dilateSliceFactor")
 	{
 		s >> settings.dilateSliceFactor;
@@ -107,6 +97,11 @@ void ReadSetting(std::istream& s, const std::string& name, Settings& settings)
 	{
 		s >> settings.optimizeMesh;
 	}
+	else if (name == "offscreen")
+	{
+		s >> settings.offscreen;
+	}
+
 }
 
 void ReadSettings(std::istream& s, Settings& settings)
@@ -119,7 +114,7 @@ void ReadSettings(std::istream& s, Settings& settings)
 	}
 }
 
-void RenderCommand(std::istream& s, Renderer& r)
+void RenderCommand(std::istream& s, Renderer& r, const Settings& settings)
 {
 	std::string str;
 	s >> str;
@@ -157,23 +152,33 @@ void RenderCommand(std::istream& s, Renderer& r)
 		s >> delay;
 		std::this_thread::sleep_for(std::chrono::milliseconds(delay));
 	}
+	else if (str == "MirrorX")
+	{
+		r.MirrorX();
+	}
+	else if (str == "MirrorY")
+	{
+		r.MirrorY();
+	}
+	else if (str == "SliceModel")
+	{
+		auto tStart = std::chrono::high_resolution_clock::now();
+
+		uint32_t nSlice = 0;
+		r.FirstSlice();
+		do
+		{
+			r.SavePng(settings.outputDir + std::to_string(nSlice) + ".png");
+
+			++nSlice;
+		} while (r.NextSlice());
+
+		auto tRender = std::chrono::high_resolution_clock::now();
+		auto renderTime = std::chrono::duration_cast<std::chrono::milliseconds>(tRender - tStart).count();
+		std::cout << "Render: " << renderTime <<
+			" ms, " << (nSlice * 1000.0) / renderTime << " FPS" << std::endl;
+	}
 }
-
-#ifdef HAVE_LIBBCM_HOST
-class BCMHost
-{
-public:
-	BCMHost()
-	{
-		bcm_host_init();
-	}
-	~BCMHost()
-	{
-		bcm_host_deinit();
-	}
-};
-#endif
-
 
 int main(int argc, char** argv)
 {
@@ -182,43 +187,13 @@ int main(int argc, char** argv)
 		Settings settings;
 		ReadSettings(std::cin, settings);
 
-#ifdef HAVE_LIBBCM_HOST
-		BCMHost bcmHost;
-#endif
-		auto tStart = std::chrono::high_resolution_clock::now();
-		
 		Renderer r(settings);
-		auto tLoad = std::chrono::high_resolution_clock::now();
 
-		std::cout << "Load: " << std::chrono::duration_cast<std::chrono::milliseconds>(tLoad - tStart).count() <<
-			" ms" << std::endl;
-#ifdef HAVE_LIBBCM_HOST
 		while (!std::cin.eof())
 		{
-			RenderCommand(std::cin, r);
+			RenderCommand(std::cin, r, settings);
 			std::cout << "done" << std::endl;
 		}
-#else
-
-		tStart = std::chrono::high_resolution_clock::now();
-		
-		uint32_t nSlice = 0;
-		r.FirstSlice();
-		do
-		{
-			char buf[16];
-			_snprintf(buf, sizeof(buf), "%05u", nSlice);
-			r.SavePng(settings.outputDir + buf + ".png");
-
-			++nSlice;
-		}
-		while (r.NextSlice());
-
-		auto tRender = std::chrono::high_resolution_clock::now();
-		auto renderTime = std::chrono::duration_cast<std::chrono::milliseconds>(tRender - tStart).count();
-		std::cout << "Render: " << renderTime <<
-			" ms, " << (nSlice * 1000.0) / renderTime << " FPS" << std::endl;
-#endif
 	}
 	catch (const std::exception& e)
 	{

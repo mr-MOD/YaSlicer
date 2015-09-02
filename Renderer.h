@@ -4,14 +4,7 @@
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
 
-#ifdef HAVE_LIBBCM_HOST
-#include <bcm_host.h>
-#endif
-
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
+#include "GlContext.h"
 
 #include <string>
 #include <vector>
@@ -25,12 +18,13 @@
 
 struct Settings
 {
-	Settings() : step(0.025f), renderWidth(1920), renderHeight(1080), samples(0),
+	Settings() : offscreen(true), step(0.025f), renderWidth(1920), renderHeight(1080), samples(0),
 		queue(std::max(1u, std::thread::hardware_concurrency())),
-		plateWidth(96.0f), plateHeight(54.0f), downScaleCount(0),
+		plateWidth(96.0f), plateHeight(54.0f),
 		dilateCount(0), dilateSliceFactor(1), modelOffset(0.5f), optimizeMesh(true) {}
 
-	std::string stlFile;
+	bool offscreen;
+	std::string modelFile;
 	std::array<std::string, 2> machineMaskFile;
 
 	std::string outputDir;
@@ -46,7 +40,6 @@ struct Settings
 	float plateWidth;
 	float plateHeight;
 
-	uint32_t downScaleCount;
 	uint32_t dilateCount;
 	uint32_t dilateSliceFactor;
 	float modelOffset;
@@ -61,13 +54,10 @@ class Renderer
 		GLData();
 		~GLData();
 
-		EGLDisplay display;
-		EGLContext context;
-		EGLSurface surface;
-
 		GLuint mainProgram;
 		GLuint mainVertexPosAttrib;
 		GLuint mainTransformUniform;
+		GLuint mainMirrorUniform;
 
 		GLuint maskProgram;
 		GLuint maskVertexPosAttrib;
@@ -75,25 +65,8 @@ class Renderer
 		GLuint maskWVTransformUniform;
 		GLuint maskTextureUniform;
 		GLuint maskPlateSizeUniform;
-
-		GLuint dilateProgram;
-		GLuint dilateVertexPosAttrib;
-		GLuint dilateTexelSizeUniform;
-		GLuint dilateTextureUniform;
-
-		GLuint downScaleProgram;
-		GLuint downScaleVertexPosAttrib;
-		GLuint downScaleTexelSizeUniform;
-		GLuint downScaleTextureUniform;
-		GLuint downScaleLodUniform;
 		
 		std::array<GLuint, 2> machineMaskTexture;
-		GLuint renderTexture;
-		GLuint textureFBO;
-
-		GLuint renderBuffer;
-		GLuint renderBufferDepth;
-		GLuint fbo;
 
 		std::vector<GLuint> vBuffers;
 		std::vector<GLuint> iBuffers;
@@ -128,9 +101,8 @@ class Renderer
 public:
 	Renderer(const Settings& settings);
 	~Renderer();
-#ifdef WIN32
+
 	void SavePng(const std::string& fileName);
-#endif // WIN32
 
 	uint32_t GetLayersCount() const;
 	void FirstSlice();
@@ -138,32 +110,31 @@ public:
 	void Black();
 	void White();
 	void SetMask(uint32_t n);
+	void MirrorX();
+	void MirrorY();
 
 private:
 	void CreateGeometryBuffers();
-	void LoadModel(const std::function<void(
-		const std::vector<float>&, const std::vector<uint16_t>&, uint32_t, uint32_t, uint32_t)>& onMesh);
 	void LoadMasks();
 
 	void Render();
+	void RenderCommon();
+	void RenderOffscreen();
+	void RenderFullscreen();
 
 	void Model(const glm::mat4x4& wvpMatrix);
 	void Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix);
-	void Dilate();
-	void Downscale();
-	void Blit(GLuint fboFrom, GLuint fboTo);
 
 	GLData glData_;
 	ModelData model_;
 	Settings settings_;
 	uint32_t curMask_;
 
-#ifdef HAVE_LIBBCM_HOST
-	EGL_DISPMANX_WINDOW_T nativeWindow_;
-#endif
+	GLenum cullFront_;
+	GLenum cullBack_;
+	glm::vec2 mirror_;
 
-#ifdef WIN32
 	std::vector<std::future<void>> pngSaveResult_;
-#endif // WIN32
-	std::vector<uint8_t> tempPixelBuffer_;
+	std::vector<uint8_t> raster_;
+	std::unique_ptr<IGlContext> glContext_;
 };

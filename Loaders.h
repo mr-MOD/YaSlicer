@@ -12,7 +12,7 @@ enum class FileType
 	Unknown
 };
 
-const uint32_t MeshSignature = 'hsem';
+const uint32_t MeshSignature = 'h' << 24 | 's' << 16 | 'e' << 8 | 'm';
 const uint16_t MeshVersion = 0x0100;
 #pragma pack(push, 1)
 struct MeshHeader
@@ -38,3 +38,6 @@ void LoadStl(const std::string& file, std::vector<float>& vb, std::vector<uint32
 void LoadObj(const std::string& file, std::vector<float>& vb, std::vector<uint32_t>& ib);
 void LoadMesh(const std::string& file,
 	const std::function<void(const std::vector<float>&, const std::vector<uint16_t>&, uint32_t, uint32_t, uint32_t)>& onMesh);
+
+void LoadModel(const std::string& file, bool writeMesh, bool optimize, const std::function<void(
+	const std::vector<float>&, const std::vector<uint16_t>&, uint32_t, uint32_t, uint32_t)>& onMesh);
