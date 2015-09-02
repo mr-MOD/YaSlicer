@@ -4,7 +4,8 @@
 #include <stdexcept>
 #include <cassert>
 
-GlContextRPi::GlContextRPi(uint32_t width, uint32_t height, uint32_t samples)
+GlContextRPi::GlContextRPi(uint32_t width, uint32_t height, uint32_t samples) :
+	mayHaveNoise_(true)
 {
 	gl_.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 	if (!gl_.display)
@@ -139,7 +140,16 @@ uint32_t GlContextRPi::GetSurfaceHeight() const
 
 void GlContextRPi::SwapBuffers()
 {
+	if (mayHaveNoise_)
+	{
+		auto raster = GetRaster();
+		decltype(raster) temp(raster.size());
+		ClearNoise(raster, temp, GetSurfaceWidth(), GetSurfaceHeight());
+		SetRaster(temp, GetSurfaceWidth(), GetSurfaceHeight());
+	}
+
 	eglSwapBuffers(gl_.display, gl_.surface);
+	mayHaveNoise_ = true;
 }
 
 std::vector<uint8_t> GlContextRPi::GetRaster()
@@ -162,8 +172,8 @@ std::vector<uint8_t> GlContextRPi::GetRaster()
 
 	/*CRUTCH: RPi have GL driver bugs, leaving junk pixels*/
 	decltype(retVal) temp(retVal.size());
-	Erode(retVal, temp, GetSurfaceWidth(), GetSurfaceHeight());
-	Dilate(temp, retVal, GetSurfaceWidth(), GetSurfaceHeight());
+	ClearNoise(retVal, temp, GetSurfaceWidth(), GetSurfaceHeight());
+	std::swap(retVal, temp);
 	/*END CRUTCH*/
 
 	return retVal;
@@ -172,6 +182,7 @@ std::vector<uint8_t> GlContextRPi::GetRaster()
 void GlContextRPi::SetRaster(const std::vector<uint8_t>& raster, uint32_t width, uint32_t height)
 {
 	rasterSetter_->SetRaster(raster, width, height);
+	mayHaveNoise_ = false;
 }
 
 std::unique_ptr<IGlContext> CreateFullscreenGlContext(uint32_t width, uint32_t height, uint32_t samples)

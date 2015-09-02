@@ -43,3 +43,31 @@ void Erode(const std::vector<uint8_t>& in, std::vector<uint8_t>& out, uint32_t w
 		}
 	}
 }
+
+void ClearNoise(const std::vector<uint8_t>& in, std::vector<uint8_t>& out, uint32_t width, uint32_t height)
+{
+	for (auto y = 1; y < static_cast<int32_t>(height) - 1; ++y)
+	{
+		for (auto x = 1; x < static_cast<int32_t>(width) - 1; ++x)
+		{
+			auto sum = 0u;
+			sum += (in[(y - 1) * width + (x - 1)] > 0 ? 1 : 0);
+			sum += (in[(y - 1) * width + (x + 0)] > 0 ? 1 : 0);
+			sum += (in[(y - 1) * width + (x + 1)] > 0 ? 1 : 0);
+			sum += (in[(y + 0) * width + (x - 1)] > 0 ? 1 : 0);
+			sum += (in[(y + 0) * width + (x + 1)] > 0 ? 1 : 0);
+			sum += (in[(y + 1) * width + (x - 1)] > 0 ? 1 : 0);
+			sum += (in[(y + 1) * width + (x + 0)] > 0 ? 1 : 0);
+			sum += (in[(y + 1) * width + (x + 1)] > 0 ? 1 : 0);
+
+			if (sum < 2)
+			{
+				out[y * width + x] = 0;
+			}
+			else
+			{
+				out[y * width + x] = in[y * width + x];
+			}
+		}
+	}
+}

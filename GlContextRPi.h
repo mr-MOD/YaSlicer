@@ -50,4 +50,6 @@ private:
 	EGL_DISPMANX_WINDOW_T nativeWindow_;
 	std::vector<uint8_t> tempPixelBuffer_;
 	std::unique_ptr<RasterSetter> rasterSetter_;
+
+	bool mayHaveNoise_;
 };
