@@ -3,6 +3,8 @@
 #include <memory>
 #include <iostream>
 #include <fstream>
+#include <sstream>
+#include <iomanip>
 #include <string>
 #include <algorithm>
 #include <thread>
@@ -168,7 +170,9 @@ void RenderCommand(std::istream& s, Renderer& r, const Settings& settings)
 		r.FirstSlice();
 		do
 		{
-			r.SavePng(settings.outputDir + std::to_string(nSlice) + ".png");
+			std::stringstream s;
+			s << std::setfill('0') << std::setw(5) << nSlice;
+			r.SavePng(settings.outputDir + s.str() + ".png");
 
 			++nSlice;
 		} while (r.NextSlice());
