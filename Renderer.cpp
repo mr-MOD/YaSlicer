@@ -330,7 +330,7 @@ void Renderer::RenderCommon()
 		decltype(raster_) rasterDilate(raster_.size());
 		for (auto i = 0u; i < settings_.dilateCount; ++i)
 		{
-			Dilate(raster_, rasterDilate, settings_.renderWidth, settings_.renderHeight);
+			DilateAxial(raster_, rasterDilate, settings_.renderWidth, settings_.renderHeight);
 			raster_.swap(rasterDilate);
 		}
 	}
