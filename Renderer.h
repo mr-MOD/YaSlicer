@@ -21,7 +21,8 @@ struct Settings
 	Settings() : offscreen(true), step(0.025f), renderWidth(1920), renderHeight(1080), samples(0),
 		queue(std::max(1u, std::thread::hardware_concurrency())),
 		plateWidth(96.0f), plateHeight(54.0f),
-		dilateCount(0), dilateSliceFactor(1), modelOffset(0.5f), optimizeMesh(true) {}
+		doAxialDilate(true), doOmniDirectionalDilate(false), omniDilateSliceFactor(1), omniDilateScale(1.0f),
+		modelOffset(0), optimizeMesh(true), doBinarize(false), binarizeThreshold(0) {}
 
 	bool offscreen;
 	std::string modelFile;
@@ -40,8 +41,15 @@ struct Settings
 	float plateWidth;
 	float plateHeight;
 
-	uint32_t dilateCount;
-	uint32_t dilateSliceFactor;
+	bool doAxialDilate;
+	bool doOmniDirectionalDilate;
+
+	uint32_t omniDilateSliceFactor;
+	float omniDilateScale;
+
+	bool doBinarize;
+	uint32_t binarizeThreshold;
+
 	float modelOffset;
 
 	bool optimizeMesh;

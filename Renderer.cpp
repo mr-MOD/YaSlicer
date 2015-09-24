@@ -324,16 +324,39 @@ void Renderer::RenderCommon()
 	Mask(wvpMatrix, wvMatrix);
 	GlCheck("Error rendering frame");
 
-	if (settings_.dilateCount > 0)
+	raster_.clear();
+	decltype(raster_) rasterDilate;
+
+	if (settings_.doAxialDilate)
 	{
 		raster_ = glContext_->GetRaster();
-		decltype(raster_) rasterDilate(raster_.size());
-		for (auto i = 0u; i < settings_.dilateCount; ++i)
-		{
-			DilateAxial(raster_, rasterDilate, settings_.renderWidth, settings_.renderHeight);
-			raster_.swap(rasterDilate);
-		}
+		rasterDilate.resize(raster_.size());
+		DilateAxial(raster_, rasterDilate, settings_.renderWidth, settings_.renderHeight);
+		raster_.swap(rasterDilate);
 	}
+
+	auto currentSlice = static_cast<uint32_t>((model_.pos - model_.min.z) / settings_.step + 0.5f);
+	if (settings_.doOmniDirectionalDilate && currentSlice % settings_.omniDilateSliceFactor == 0)
+	{
+		if (raster_.empty())
+		{
+			raster_ = glContext_->GetRaster();
+		}
+		
+		rasterDilate.resize(raster_.size());
+		ScaledDilate(raster_, rasterDilate, settings_.renderWidth, settings_.renderHeight, settings_.omniDilateScale);
+		raster_.swap(rasterDilate);
+	}
+
+	if (settings_.doBinarize)
+	{
+		if (raster_.empty())
+		{
+			raster_ = glContext_->GetRaster();
+		}
+
+		Binarize(raster_, settings_.binarizeThreshold);
+	}	
 }
 
 void Renderer::RenderOffscreen()
@@ -345,7 +368,7 @@ void Renderer::RenderFullscreen()
 {
 	RenderCommon();
 
-	if (settings_.dilateCount > 0)
+	if (settings_.doAxialDilate || settings_.doOmniDirectionalDilate)
 	{
 		glContext_->SetRaster(raster_, settings_.renderWidth, settings_.renderHeight);
 	}

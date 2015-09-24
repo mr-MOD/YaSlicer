@@ -83,13 +83,29 @@ void ReadSetting(std::istream& s, const std::string& name, Settings& settings)
 	{
 		s >> settings.queue;
 	}
-	else if (name == "dilateCount")
+	else if (name == "doAxialDilate")
 	{
-		s >> settings.dilateCount;
+		s >> settings.doAxialDilate;
 	}
-	else if (name == "dilateSliceFactor")
+	else if (name == "doOmniDirectionalDilate")
 	{
-		s >> settings.dilateSliceFactor;
+		s >> settings.doOmniDirectionalDilate;
+	}
+	else if (name == "omniDilateSliceFactor")
+	{
+		s >> settings.omniDilateSliceFactor;
+	}
+	else if (name == "omniDilateScale")
+	{
+		s >> settings.omniDilateScale;
+	}
+	else if (name == "doBinarize")
+	{
+		s >> settings.doBinarize;
+	}
+	else if (name == "binarizeThreshold")
+	{
+		s >> settings.binarizeThreshold;
 	}
 	else if (name == "modelOffset")
 	{
@@ -103,7 +119,6 @@ void ReadSetting(std::istream& s, const std::string& name, Settings& settings)
 	{
 		s >> settings.offscreen;
 	}
-
 }
 
 void ReadSettings(std::istream& s, Settings& settings)
