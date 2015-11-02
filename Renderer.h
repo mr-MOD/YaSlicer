@@ -50,7 +50,7 @@ struct Settings
 	bool doBinarize;
 	uint32_t binarizeThreshold;
 
-	float modelOffset;
+	glm::vec2 modelOffset;
 
 	bool optimizeMesh;
 };

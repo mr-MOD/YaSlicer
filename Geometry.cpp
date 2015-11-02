@@ -154,7 +154,16 @@ void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, const uint32_t
 	}
 }
 
+glm::float16 toFloat16(float f)
+{
+	return glm::float16(f);
+}
 
+void ConvertToFloat16(const std::vector<float>& in, std::vector<glm::float16>& out)
+{
+	out.resize(in.size());
+	std::transform(in.begin(), in.end(), out.begin(), toFloat16);
+}
 
 void testRemoveVbHoles()
 {

@@ -177,11 +177,11 @@ void LoadObj(const std::string& file, std::vector<float>& vb, std::vector<uint32
 		else if (type == "f")
 		{
 			s >> ind;
-			ib.push_back(std::stoi(ind));
+			ib.push_back(std::stoi(ind) - 1);
 			s >> ind;
-			ib.push_back(std::stoi(ind));
+			ib.push_back(std::stoi(ind) - 1);
 			s >> ind;
-			ib.push_back(std::stoi(ind));
+			ib.push_back(std::stoi(ind) - 1);
 		}
 	}
 }

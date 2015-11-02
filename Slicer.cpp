@@ -109,7 +109,7 @@ void ReadSetting(std::istream& s, const std::string& name, Settings& settings)
 	}
 	else if (name == "modelOffset")
 	{
-		s >> settings.modelOffset;
+		s >> settings.modelOffset.x >> settings.modelOffset.y;
 	}
 	else if (name == "optimizeMesh")
 	{

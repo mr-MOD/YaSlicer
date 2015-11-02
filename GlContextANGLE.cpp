@@ -4,7 +4,10 @@
 #include <cassert>
 #include <algorithm>
 
-void CheckRequiredExtensions();
+namespace
+{
+	void CheckRequiredExtensions();
+}
 
 GlContextANGLE::GlContextANGLE(uint32_t width, uint32_t height, uint32_t samples) :
 width_(width),
@@ -240,24 +243,27 @@ std::unique_ptr<IGlContext> CreateOffscreenGlContext(uint32_t width, uint32_t he
 	return std::make_unique<GlContextANGLE>(width, height, samples);
 }
 
-void CheckRequiredExtensions()
+namespace
 {
-	std::string extString = (const char*)glGetString(GL_EXTENSIONS);
-
-	const char* extensions[] =
+	void CheckRequiredExtensions()
 	{
-		"GL_EXT_texture_storage",
-		"GL_ANGLE_framebuffer_blit",
-		"GL_ANGLE_framebuffer_multisample",
-		"GL_OES_packed_depth_stencil"
-	};
+		std::string extString = (const char*)glGetString(GL_EXTENSIONS);
 
-	auto it = std::find_if(std::begin(extensions), std::end(extensions), [&extString](const char* ext) {
-		return extString.find(ext) == std::string::npos;
-	});
+		const char* extensions[] =
+		{
+			"GL_EXT_texture_storage",
+			"GL_ANGLE_framebuffer_blit",
+			"GL_ANGLE_framebuffer_multisample",
+			"GL_OES_packed_depth_stencil"
+		};
 
-	if (it != std::end(extensions))
-	{
-		throw std::runtime_error(std::string("Your system do not support extension: ") + *it);
+		auto it = std::find_if(std::begin(extensions), std::end(extensions), [&extString](const char* ext) {
+			return extString.find(ext) == std::string::npos;
+		});
+
+		if (it != std::end(extensions))
+		{
+			throw std::runtime_error(std::string("Your system do not support extension: ") + *it);
+		}
 	}
 }

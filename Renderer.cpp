@@ -196,8 +196,8 @@ void Renderer::CreateGeometryBuffers()
 
 		GLData::TriangleData triData(front, ortho, back);
 
-		GLuint buffers[2];
-		glGenBuffers(2, buffers);
+		GLuint buffers[2] = { 0 };
+		glGenBuffers(_countof(buffers), buffers);
 
 		glBindBuffer(GL_ARRAY_BUFFER, buffers[0]);
 		glBufferData(GL_ARRAY_BUFFER, vb.size() * sizeof(vb[0]), vb.data(), GL_STATIC_DRAW);
@@ -303,8 +303,8 @@ void Renderer::RenderCommon()
 	auto middle = (model_.min + model_.max) * 0.5f;
 	auto extent = model_.max - model_.min;
 
-	auto offsetX = -(settings_.plateWidth / settings_.renderWidth) * settings_.modelOffset;
-	auto offsetY = (settings_.plateHeight / settings_.renderHeight) * settings_.modelOffset;
+	auto offsetX = -(settings_.plateWidth / settings_.renderWidth) * settings_.modelOffset.x;
+	auto offsetY = (settings_.plateHeight / settings_.renderHeight) * settings_.modelOffset.y;
 
 	auto model = glm::scale(glm::vec3(1.0f, 1.0f, 1.0f)) * glm::translate(offsetX, offsetY, 0.0f);
 
@@ -403,7 +403,7 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glData_.iBuffers[i]);
 		glDrawElements(GL_TRIANGLES, glData_.iCount[i].orthoFacing + glData_.iCount[i].backFacing,
 			GL_UNSIGNED_SHORT, reinterpret_cast<void*>(glData_.iCount[i].frontFacing * sizeof(uint16_t)));
-	}
+	}	
 
 	glStencilFunc(GL_ALWAYS, 0, 0xFF);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_DECR);
