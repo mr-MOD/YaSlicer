@@ -27,37 +27,21 @@ const std::string FullScreenFS = SHADER
 	}
 );
 
-RasterSetter::RasterSetter()
+RasterSetter::RasterSetter() :
+	texture_(GLTexture::Create()),
+	program_(CreateProgram(CreateVertexShader(FullScreenVS), CreateFragmentShader(FullScreenFS))),
+	texelSizeUniform_(0), textureUniform_(0), vertexPosAttrib_(0)
 {
-	glGenTextures(1, &gl_.texture);
+	texelSizeUniform_ = glGetUniformLocation(program_.GetHandle(), "texelSize");
+	textureUniform_ = glGetUniformLocation(program_.GetHandle(), "texture");
+	vertexPosAttrib_ = glGetAttribLocation(program_.GetHandle(), "vPosition");
 
-	gl_.program = CreateProgram(CreateShader(GL_VERTEX_SHADER, FullScreenVS), CreateShader(GL_FRAGMENT_SHADER, FullScreenFS));
-	gl_.texelSizeUniform = glGetUniformLocation(gl_.program, "texelSize");
-	gl_.textureUniform = glGetUniformLocation(gl_.program, "texture");
-	gl_.vertexPosAttrib = glGetAttribLocation(gl_.program, "vPosition");
-	GlCheck("Error initializing RasterSetter shader data");
-}
-
-RasterSetter::GlData::GlData() : texture(0), program(0), texelSizeUniform(0), textureUniform(0), vertexPosAttrib(0)
-{
-}
-
-RasterSetter::GlData::~GlData()
-{
-	if (texture)
-	{
-		glDeleteTextures(1, &texture);
-	}
-
-	if (program)
-	{
-		glDeleteProgram(program);
-	}
+	GL_CHECK();
 }
 
 void RasterSetter::SetRaster(const std::vector<uint8_t>& raster, uint32_t width, uint32_t height)
 {
-	glBindTexture(GL_TEXTURE_2D, gl_.texture);
+	glBindTexture(GL_TEXTURE_2D, texture_.GetHandle());
 	if (raster.size() == width*height)
 	{
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, width, height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, raster.data());
@@ -75,7 +59,7 @@ void RasterSetter::SetRaster(const std::vector<uint8_t>& raster, uint32_t width,
 		throw std::runtime_error("SetRaster: Invalid raster size");
 	}
 
-	glUseProgram(gl_.program);
+	glUseProgram(program_.GetHandle());
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	const float quad[] =
 	{
@@ -87,31 +71,30 @@ void RasterSetter::SetRaster(const std::vector<uint8_t>& raster, uint32_t width,
 		1, 1, 0,
 		1, -1, 0
 	};
-	glVertexAttribPointer(gl_.vertexPosAttrib, 3, GL_FLOAT, GL_FALSE, 0, quad);
+	glVertexAttribPointer(vertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, quad);
 
 	glCullFace(GL_FRONT);
 	glDisable(GL_STENCIL_TEST);
 	glStencilFunc(GL_ALWAYS, 0, 0);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-	glUniform2f(gl_.texelSizeUniform, 1.0f / width, 1.0f / height);
+	glUniform2f(texelSizeUniform_, 1.0f / width, 1.0f / height);
 
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, gl_.texture);
+	glBindTexture(GL_TEXTURE_2D, texture_.GetHandle());
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-	glUniform1i(gl_.textureUniform, 0);
+	glUniform1i(textureUniform_, 0);
 	glDrawArrays(GL_TRIANGLES, 0, sizeof(quad) / sizeof(quad[0]) / 3);
 
-	GlCheck("Error setting raster");
+	GL_CHECK();
 }
 
-GLuint CreateShader(GLenum type, const std::string& source)
+void CompileShader(GLuint shader, const std::string& source)
 {
-	auto shader = glCreateShader(type);
 	const char *sourceArray[1] = { source.c_str() };
 	glShaderSource(shader, 1, sourceArray, nullptr);
 	glCompileShader(shader);
@@ -126,36 +109,43 @@ GLuint CreateShader(GLenum type, const std::string& source)
 		infoLog.resize(length);
 		glGetShaderInfoLog(shader, static_cast<GLsizei>(infoLog.length()), &length, &infoLog[0]);
 
-		glDeleteShader(shader);
 		throw std::runtime_error("Shader compilation error: " + infoLog);
 	}
+}
 
+GLVertexShader CreateVertexShader(const std::string& source)
+{
+	auto shader = GLVertexShader::Create();
+	CompileShader(shader.GetHandle(), source);
 	return shader;
 }
 
-GLuint CreateProgram(GLuint vertexShader, GLuint fragShader)
+GLFragmentShader CreateFragmentShader(const std::string& source)
 {
-	auto program = glCreateProgram();
+	auto shader = GLFragmentShader::Create();
+	CompileShader(shader.GetHandle(), source);
+	return shader;
+}
 
-	glAttachShader(program, vertexShader);
-	glDeleteShader(vertexShader);
+GLProgram CreateProgram(const GLVertexShader& vertexShader, const GLFragmentShader& fragShader)
+{
+	auto program = GLProgram::Create();
 
-	glAttachShader(program, fragShader);
-	glDeleteShader(fragShader);
+	glAttachShader(program.GetHandle(), vertexShader.GetHandle());
+	glAttachShader(program.GetHandle(), fragShader.GetHandle());
 
-	glLinkProgram(program);
+	glLinkProgram(program.GetHandle());
 
 	GLint status = 0;
-	glGetProgramiv(program, GL_LINK_STATUS, &status);
+	glGetProgramiv(program.GetHandle(), GL_LINK_STATUS, &status);
 	if (!status)
 	{
 		GLsizei length;
 		std::string infoLog;
-		glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
+		glGetProgramiv(program.GetHandle(), GL_INFO_LOG_LENGTH, &length);
 		infoLog.resize(length);
-		glGetProgramInfoLog(program, static_cast<GLsizei>(infoLog.length()), &length, &infoLog[0]);
+		glGetProgramInfoLog(program.GetHandle(), static_cast<GLsizei>(infoLog.length()), &length, &infoLog[0]);
 
-		glDeleteProgram(program);
 		throw std::runtime_error("Program link error: " + infoLog);
 	}
 

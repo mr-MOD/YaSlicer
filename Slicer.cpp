@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "ErrorHandling.h"
 
 #include <memory>
 #include <iostream>

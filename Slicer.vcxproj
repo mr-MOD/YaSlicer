@@ -165,6 +165,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="CacheOpt.h" />
+    <ClInclude Include="ErrorHandling.h" />
     <ClInclude Include="Geometry.h" />
     <ClInclude Include="GlContext.h" />
     <ClInclude Include="GlContextANGLE.h" />

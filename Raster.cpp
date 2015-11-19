@@ -30,9 +30,9 @@ void DilateAxial(const std::vector<uint8_t>& in, std::vector<uint8_t>& out, uint
 		for (auto x = 1; x < static_cast<int32_t>(width) - 1; ++x)
 		{
 			auto m = in[y * width + x];	
-			m = std::max(m, in[(y + 0) * width + (x + 1)]);
-			m = std::max(m, in[(y + 1) * width + (x + 0)]);
-			m = std::max(m, in[(y + 1) * width + (x + 1)]);
+			m = std::max(m, in[(y - 0) * width + (x - 1)]);
+			m = std::max(m, in[(y - 1) * width + (x - 0)]);
+			m = std::max(m, in[(y - 1) * width + (x - 1)]);
 
 			out[y * width + x] = m;
 		}

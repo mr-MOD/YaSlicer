@@ -9,6 +9,7 @@
 #include "Png.h"
 #include "Loaders.h"
 #include "Raster.h"
+#include "GlContext.h"
 
 #include <stdexcept>
 #include <numeric>
@@ -19,8 +20,6 @@
 #include <chrono>
 #include <thread>
 #include <cerrno>
-
-const auto PNGBytesPerPixel = 1;
 
 const std::string VShader = SHADER
 (
@@ -46,6 +45,8 @@ const std::string FShader = SHADER
 	}
 );
 
+//////////////////////////////////////
+
 const std::string MaskVShader = SHADER
 (
 	precision mediump float;
@@ -68,74 +69,72 @@ const std::string MaskFShader = SHADER
 	precision mediump float;
 
 	varying vec2 texCoord;
-	uniform sampler2D texture;
+	uniform sampler2D maskTexture;
 
 	void main()
 	{
-		gl_FragColor = texture2D(texture, texCoord);
+		gl_FragColor = texture2D(maskTexture, texCoord);
 	}
 );
 
-Renderer::GLData::GLData() :
-	mainProgram(0),
-	mainVertexPosAttrib(0),
-	mainTransformUniform(0),
-	mainMirrorUniform(0),
+//////////////////////////////////////
 
-	maskProgram(0),
-	maskVertexPosAttrib(0),
-	maskWVTransformUniform(0),
-	maskWVPTransformUniform(0),
-	maskTextureUniform(0),
-	maskPlateSizeUniform(0),
-
-#ifdef _MSC_VER
-	machineMaskTexture( { 0, 0 } )
-#else
-	machineMaskTexture{ { 0, 0 } }
-#endif
-{
-}
-
-Renderer::GLData::~GLData()
-{
-	if (vBuffers.size())
+const std::string CombineVShader = SHADER
+(
+	precision mediump float;
+	uniform vec2 texelSize;
+	attribute vec2 vPosition;
+	varying vec2 normalTexCoord;
+	varying vec2 mirrorTexCoord;
+	
+	void main()
 	{
-		glDeleteBuffers(static_cast<GLsizei>(vBuffers.size()), &vBuffers[0]);
+		gl_Position = vec4(vPosition, 0, 1);
+		vec2 baseTexCoord = (vPosition + vec2(1, 1)) * 0.5;
+		normalTexCoord = baseTexCoord;
+		mirrorTexCoord = (vec2(1,1) - baseTexCoord);
 	}
+);
 
-	if (iBuffers.size())
-	{
-		glDeleteBuffers(static_cast<GLsizei>(iBuffers.size()), &iBuffers[0]);
-	}
+const std::string CombineFShader = SHADER
+(
+	precision mediump float;
 
-	if (machineMaskTexture[0] != 0)
-	{
-		glDeleteTextures(1, &machineMaskTexture[0]);
-	}
+	varying vec2 normalTexCoord;
+	varying vec2 mirrorTexCoord;
+	uniform sampler2D normalTexture;
+	uniform sampler2D mirrorTexture;
 
-	if (machineMaskTexture[1] != 0)
+	void main()
 	{
-		glDeleteTextures(1, &machineMaskTexture[1]);
+		vec4 normal = texture2D(normalTexture, normalTexCoord);
+		vec4 mirror = texture2D(mirrorTexture, mirrorTexCoord);
+		gl_FragColor = normal + mirror;
 	}
+);
 
-	if (mainProgram)
-	{
-		glDeleteProgram(mainProgram);
-		mainProgram = 0;
-	}
-
-	if (maskProgram)
-	{
-		glDeleteProgram(maskProgram);
-		maskProgram = 0;
-	}
-}
 
 Renderer::Renderer(const Settings& settings) :
 settings_(settings), curMask_(0),
 cullFront_(GL_FRONT), cullBack_(GL_BACK),
-mirror_(1,1)
+mirror_(1,1),
+
+mainVertexPosAttrib_(0),
+mainTransformUniform_(0),
+mainMirrorUniform_(0),
+
+maskVertexPosAttrib_(0),
+maskWVTransformUniform_(0),
+maskWVPTransformUniform_(0),
+maskTextureUniform_(0),
+maskPlateSizeUniform_(0),
+
+combineVertexPosAttrib_(0),
+combineNormalTextureUniform_(0),
+combineMirrorTextureUniform_(0),
+combineTexelSizeUniform_(0),
+
+whiteTexture_(GLTexture::Create())
 {
 	if (settings_.offscreen)
 	{
@@ -146,28 +145,41 @@ mirror_(1,1)
 		glContext_ = CreateFullscreenGlContext(settings_.renderWidth, settings_.renderHeight, settings_.samples);
 	}
 
-	glData_.mainProgram = CreateProgram(CreateShader(GL_VERTEX_SHADER, VShader), CreateShader(GL_FRAGMENT_SHADER, FShader));
-	glData_.mainTransformUniform = glGetUniformLocation(glData_.mainProgram, "wvp");
-	glData_.mainMirrorUniform = glGetUniformLocation(glData_.mainProgram, "mirror");
-	glData_.mainVertexPosAttrib = glGetAttribLocation(glData_.mainProgram, "vPosition");
-	GlCheck("Error initializing main shader data");
+	mainProgram_ = CreateProgram(CreateVertexShader(VShader), CreateFragmentShader(FShader));
+	mainTransformUniform_ = glGetUniformLocation(mainProgram_.GetHandle(), "wvp");
+	mainMirrorUniform_ = glGetUniformLocation(mainProgram_.GetHandle(), "mirror");
+	mainVertexPosAttrib_ = glGetAttribLocation(mainProgram_.GetHandle(), "vPosition");
+	GL_CHECK();
 
-	glData_.maskProgram = CreateProgram(CreateShader(GL_VERTEX_SHADER, MaskVShader), CreateShader(GL_FRAGMENT_SHADER, MaskFShader));
-	glData_.maskWVTransformUniform = glGetUniformLocation(glData_.maskProgram, "wv");
-	glData_.maskWVPTransformUniform = glGetUniformLocation(glData_.maskProgram, "wvp");
-	glData_.maskPlateSizeUniform = glGetUniformLocation(glData_.maskProgram, "plateSize");
-	glData_.maskTextureUniform = glGetUniformLocation(glData_.maskProgram, "texture");
-	glData_.maskVertexPosAttrib = glGetAttribLocation(glData_.maskProgram, "vPosition");
-	GlCheck("Error initializing mask shader data");
+	maskProgram_ = CreateProgram(CreateVertexShader(MaskVShader), CreateFragmentShader(MaskFShader));
+	maskWVTransformUniform_ = glGetUniformLocation(maskProgram_.GetHandle(), "wv");
+	maskWVPTransformUniform_ = glGetUniformLocation(maskProgram_.GetHandle(), "wvp");
+	maskPlateSizeUniform_ = glGetUniformLocation(maskProgram_.GetHandle(), "plateSize");
+	maskTextureUniform_ = glGetUniformLocation(maskProgram_.GetHandle(), "maskTexture");
+	maskVertexPosAttrib_ = glGetAttribLocation(maskProgram_.GetHandle(), "vPosition");
+	GL_CHECK();
 
-	glGenTextures(static_cast<GLsizei>(glData_.machineMaskTexture.size()), &glData_.machineMaskTexture[0]);
-	for (auto tex : glData_.machineMaskTexture)
+	combineProgram_ = CreateProgram(CreateVertexShader(CombineVShader), CreateFragmentShader(CombineFShader));
+	combineNormalTextureUniform_ = glGetUniformLocation(combineProgram_.GetHandle(), "normalTexture");
+	combineMirrorTextureUniform_ = glGetUniformLocation(combineProgram_.GetHandle(), "mirrorTexture");
+	combineTexelSizeUniform_ = glGetUniformLocation(combineProgram_.GetHandle(), "texelSize");
+	combineVertexPosAttrib_ = glGetAttribLocation(combineProgram_.GetHandle(), "vPosition");
+	GL_CHECK();
+
+	glContext_->CreateTextureFBO(mirrorImageFBO_, mirrorImageTexture_);
+	glContext_->CreateTextureFBO(normalImageFBO_, normalImageTexture_);
+
+	const uint32_t WhiteOpaquePixel = 0xFFFFFFFF;
+	glBindTexture(GL_TEXTURE_2D, whiteTexture_.GetHandle());
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, &WhiteOpaquePixel);
+
+	for (auto& tex : machineMaskTexture_)
 	{
-		const uint32_t PixelColor = 0xFFFFFFFF;
-		glBindTexture(GL_TEXTURE_2D, tex);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, &PixelColor);
+		tex = GLTexture::Create();
+		glBindTexture(GL_TEXTURE_2D, tex.GetHandle());
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, &WhiteOpaquePixel);
 	}
-	GlCheck("Error creating default mask textures");
+	GL_CHECK();
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	glEnable(GL_CULL_FACE);
@@ -192,22 +204,22 @@ void Renderer::CreateGeometryBuffers()
 	model_.min.x = model_.min.y = model_.min.z = std::numeric_limits<float>::max();
 	model_.max.x = model_.max.y = model_.max.z = std::numeric_limits<float>::lowest();
 
-	LoadModel(settings_.modelFile, true, true, [this](const std::vector<float>& vb, const std::vector<uint16_t>& ib, uint32_t front, uint32_t ortho, uint32_t back) {
+	LoadModel(settings_.modelFile, true, false, [this](const std::vector<float>& vb, const std::vector<uint16_t>& ib, uint32_t front, uint32_t ortho, uint32_t back) {
 
-		GLData::TriangleData triData(front, ortho, back);
+		TriangleData triData(front, ortho, back);
 
-		GLuint buffers[2] = { 0 };
-		glGenBuffers(_countof(buffers), buffers);
+		auto vertexBuffer = GLBuffer::Create();
+		auto indexBuffer = GLBuffer::Create();
 
-		glBindBuffer(GL_ARRAY_BUFFER, buffers[0]);
+		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer.GetHandle());
 		glBufferData(GL_ARRAY_BUFFER, vb.size() * sizeof(vb[0]), vb.data(), GL_STATIC_DRAW);
 
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[1]);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer.GetHandle());
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, ib.size() * sizeof(ib[0]), ib.data(), GL_STATIC_DRAW);
 
-		this->glData_.vBuffers.push_back(buffers[0]);
-		this->glData_.iBuffers.push_back(buffers[1]);
-		this->glData_.iCount.push_back(triData);
+		this->vBuffers_.push_back(std::move(vertexBuffer));
+		this->iBuffers_.push_back(std::move(indexBuffer));
+		this->iCount_.push_back(triData);
 
 		for (auto i = 0u; i < vb.size(); i += 3)
 		{
@@ -318,11 +330,21 @@ void Renderer::RenderCommon()
 	auto wvMatrix = view * model;
 	auto wvpMatrix = proj * view * model;
 
-	GlCheck("Error on frame start");
+	GL_CHECK();
 
+	mirror_.x *= -1;
+	mirror_.y *= -1;
 	Model(wvpMatrix);
 	Mask(wvpMatrix, wvMatrix);
-	GlCheck("Error rendering frame");
+	glContext_->Resolve(mirrorImageFBO_);
+
+	mirror_.x *= -1;
+	mirror_.y *= -1;
+	Model(wvpMatrix);
+	Mask(wvpMatrix, wvMatrix);
+	glContext_->Resolve(normalImageFBO_);
+
+	Combine();
 
 	raster_.clear();
 	decltype(raster_) rasterDilate;
@@ -356,7 +378,7 @@ void Renderer::RenderCommon()
 		}
 
 		Binarize(raster_, settings_.binarizeThreshold);
-	}	
+	}
 }
 
 void Renderer::RenderOffscreen()
@@ -387,46 +409,46 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 	glEnable(GL_STENCIL_TEST);
 	glStencilMask(0xFF);
 
-	glUseProgram(glData_.mainProgram);
-	glUniformMatrix4fv(glData_.mainTransformUniform, 1, GL_FALSE, glm::value_ptr(wvpMatrix));
-	glUniform2fv(glData_.mainMirrorUniform, 1, glm::value_ptr(mirror_));
+	glUseProgram(mainProgram_.GetHandle());
+	glUniformMatrix4fv(mainTransformUniform_, 1, GL_FALSE, glm::value_ptr(wvpMatrix));
+	glUniform2fv(mainMirrorUniform_, 1, glm::value_ptr(mirror_));
 
 	glStencilFunc(GL_ALWAYS, 0, 0xFF);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
 	glCullFace(cullFront_);
-	for (auto i = 0u; i < glData_.vBuffers.size(); ++i)
+	for (auto i = 0u; i < vBuffers_.size(); ++i)
 	{
-		glBindBuffer(GL_ARRAY_BUFFER, glData_.vBuffers[i]);
-		glVertexAttribPointer(glData_.mainVertexPosAttrib, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-		glEnableVertexAttribArray(glData_.mainVertexPosAttrib);
+		glBindBuffer(GL_ARRAY_BUFFER, vBuffers_[i].GetHandle());
+		glVertexAttribPointer(mainVertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+		glEnableVertexAttribArray(mainVertexPosAttrib_);
 
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glData_.iBuffers[i]);
-		glDrawElements(GL_TRIANGLES, glData_.iCount[i].orthoFacing + glData_.iCount[i].backFacing,
-			GL_UNSIGNED_SHORT, reinterpret_cast<void*>(glData_.iCount[i].frontFacing * sizeof(uint16_t)));
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,iBuffers_[i].GetHandle());
+		glDrawElements(GL_TRIANGLES, iCount_[i].orthoFacing + iCount_[i].backFacing,
+			GL_UNSIGNED_SHORT, reinterpret_cast<void*>(iCount_[i].frontFacing * sizeof(uint16_t)));
 	}	
 
 	glStencilFunc(GL_ALWAYS, 0, 0xFF);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_DECR);
 	glCullFace(cullBack_);
-	for (auto i = 0u; i < glData_.vBuffers.size(); ++i)
+	for (auto i = 0u; i < vBuffers_.size(); ++i)
 	{
-		glBindBuffer(GL_ARRAY_BUFFER, glData_.vBuffers[i]);
-		glVertexAttribPointer(glData_.mainVertexPosAttrib, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-		glEnableVertexAttribArray(glData_.mainVertexPosAttrib);
+		glBindBuffer(GL_ARRAY_BUFFER, vBuffers_[i].GetHandle());
+		glVertexAttribPointer(mainVertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+		glEnableVertexAttribArray(mainVertexPosAttrib_);
 
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glData_.iBuffers[i]);
-		glDrawElements(GL_TRIANGLES, glData_.iCount[i].frontFacing + glData_.iCount[i].orthoFacing, GL_UNSIGNED_SHORT, nullptr);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, iBuffers_[i].GetHandle());
+		glDrawElements(GL_TRIANGLES, iCount_[i].frontFacing + iCount_[i].orthoFacing, GL_UNSIGNED_SHORT, nullptr);
 	}
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-	GlCheck("Error rendering model");
+	GL_CHECK();
 }
 
 void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix)
 {
 	glCullFace(GL_BACK);
 
-	glUseProgram(glData_.maskProgram);
+	glUseProgram(maskProgram_.GetHandle());
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	const float quad[] =
 	{
@@ -438,7 +460,8 @@ void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix)
 		model_.max.x, model_.max.y, model_.max.z,
 		model_.max.x, model_.min.y, model_.max.z
 	};
-	glVertexAttribPointer(glData_.maskVertexPosAttrib, 3, GL_FLOAT, GL_FALSE, 0, quad);
+	glVertexAttribPointer(maskVertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, quad);
+	glEnableVertexAttribArray(maskVertexPosAttrib_);
 
 	glEnable(GL_STENCIL_TEST);
 	glStencilMask(0xFF);
@@ -446,19 +469,65 @@ void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix)
 	glStencilFunc(GL_LESS, 0x80, 0xFF);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-	glUniformMatrix4fv(glData_.maskWVTransformUniform, 1, GL_FALSE, glm::value_ptr(wvMatrix));
-	glUniformMatrix4fv(glData_.maskWVPTransformUniform, 1, GL_FALSE, glm::value_ptr(wvpMatrix));
-	glUniform2f(glData_.maskPlateSizeUniform, settings_.plateWidth, settings_.plateHeight);
+	glUniformMatrix4fv(maskWVTransformUniform_, 1, GL_FALSE, glm::value_ptr(wvMatrix));
+	glUniformMatrix4fv(maskWVPTransformUniform_, 1, GL_FALSE, glm::value_ptr(wvpMatrix));
+	glUniform2f(maskPlateSizeUniform_, settings_.plateWidth, settings_.plateHeight);
 
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, glData_.machineMaskTexture[curMask_]);
+	glBindTexture(GL_TEXTURE_2D, machineMaskTexture_[curMask_].GetHandle());
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-	glUniform1i(glData_.maskTextureUniform, 0);
-	glDrawArrays(GL_TRIANGLES, 0, sizeof(quad) / sizeof(quad[0]) / 3);
+	glUniform1i(maskTextureUniform_, 0);
+	glDrawArrays(GL_TRIANGLES, 0, _countof(quad) / 3);
 
-	GlCheck("Error rendering mask");
+	GL_CHECK();
+}
+
+void Renderer::Combine()
+{
+	glViewport(0, 0, settings_.renderWidth, settings_.renderHeight);
+
+	glCullFace(GL_FRONT);
+
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	glUseProgram(combineProgram_.GetHandle());
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, normalImageTexture_.GetHandle());
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, mirrorImageTexture_.GetHandle());
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	glUniform1i(combineNormalTextureUniform_, 0);
+	glUniform1i(combineMirrorTextureUniform_, 1);
+
+	glUniform2f(combineTexelSizeUniform_, 1.0f / settings_.renderWidth, 1.0f / settings_.renderHeight);
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	const float quad[] =
+	{
+		-1, -1,
+		-1, 1,
+		1, 1,
+
+		-1, -1,
+		1, 1,
+		1, -1
+	};
+	glVertexAttribPointer(combineVertexPosAttrib_, 2, GL_FLOAT, GL_FALSE, 0, quad);
+	glEnableVertexAttribArray(combineVertexPosAttrib_);
+	glDrawArrays(GL_TRIANGLES, 0, _countof(quad) / 2);
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+	GL_CHECK();
 }
 
 void Renderer::SavePng(const std::string& fileName)
@@ -521,10 +590,10 @@ void Renderer::LoadMasks()
 				throw std::runtime_error("Only support 8 bit per channel RGB (no alpha) PNG files for mask");
 			}
 
-			glBindTexture(GL_TEXTURE_2D, glData_.machineMaskTexture[i]);
+			glBindTexture(GL_TEXTURE_2D, machineMaskTexture_[i].GetHandle());
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, &pixelData[0]);
 
-			GlCheck("Error creating texture " + settings_.machineMaskFile[i]);
+			GL_CHECK();
 		}
 	}
 

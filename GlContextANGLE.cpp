@@ -86,7 +86,7 @@ height_(height)
 	CheckRequiredExtensions();
 	CreateMultisampledFBO(width_, height_, samples);
 
-	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo.GetHandle());
 
 	rasterSetter_ = std::make_unique<RasterSetter>();
 }
@@ -98,23 +98,9 @@ GlContextANGLE::GLData::~GLData()
 		eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 	}
 
-	if (fbo)
-	{
-		glDeleteFramebuffers(1, &fbo);
-		fbo = 0;
-	}
-
-	if (renderBuffer)
-	{
-		glDeleteRenderbuffers(1, &renderBuffer);
-		renderBuffer = 0;
-	}
-
-	if (renderBufferDepth)
-	{
-		glDeleteRenderbuffers(1, &renderBufferDepth);
-		renderBufferDepth = 0;
-	}
+	fbo = GLFramebuffer();
+	renderBuffer = GLRenderbuffer();
+	renderBufferDepth = GLRenderbuffer();
 
 	if (surface != EGL_NO_SURFACE)
 	{
@@ -157,11 +143,11 @@ std::vector<uint8_t> GlContextANGLE::GetRaster()
 		tempPixelBuffer_.resize(GetSurfaceWidth() * GetSurfaceHeight() * FBOBytesPerPixel);
 	}
 
-	Blit(gl_.fbo, 0);
+	Blit(gl_.fbo, GLFramebuffer(0));
 	glBindFramebuffer(GL_READ_FRAMEBUFFER_ANGLE, 0);
 	glPixelStorei(GL_PACK_ALIGNMENT, 1);
 	glReadPixels(0, 0, GetSurfaceWidth(), GetSurfaceHeight(), GL_RGBA, GL_UNSIGNED_BYTE, tempPixelBuffer_.data());
-	GlCheck("Error reading gl surface data");
+	GL_CHECK();
 
 	std::vector<uint8_t> retVal(GetSurfaceWidth() * GetSurfaceHeight());
 	for (auto i = 0u; i < tempPixelBuffer_.size(); i += FBOBytesPerPixel)
@@ -169,7 +155,7 @@ std::vector<uint8_t> GlContextANGLE::GetRaster()
 		retVal[i / FBOBytesPerPixel] = tempPixelBuffer_[i];
 	}
 
-	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo.GetHandle());
 	return retVal;
 }
 
@@ -180,56 +166,67 @@ void GlContextANGLE::SetRaster(const std::vector<uint8_t>& raster, uint32_t widt
 
 void GlContextANGLE::SwapBuffers()
 {
-	Blit(gl_.fbo, 0);
+	Blit(gl_.fbo, GLFramebuffer(0));
 	eglSwapBuffers(gl_.display, gl_.surface);
+}
+
+void GlContextANGLE::CreateTextureFBO(GLFramebuffer& fbo, GLTexture& texture)
+{
+	CreateTextureFBO(GetSurfaceWidth(), GetSurfaceHeight(), fbo, texture);
+}
+
+void GlContextANGLE::Resolve(const GLFramebuffer& fboTo)
+{
+	Blit(gl_.fbo, fboTo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER_ANGLE, gl_.fbo.GetHandle());
 }
 
 void GlContextANGLE::CreateMultisampledFBO(uint32_t width, uint32_t height, uint32_t samples)
 {
-	glGenRenderbuffers(1, &gl_.renderBuffer);
-	glBindRenderbuffer(GL_RENDERBUFFER, gl_.renderBuffer);
+	gl_.renderBuffer = GLRenderbuffer::Create();
+	glBindRenderbuffer(GL_RENDERBUFFER, gl_.renderBuffer.GetHandle());
 	glRenderbufferStorageMultisampleANGLE(GL_RENDERBUFFER, samples, GL_BGRA8_EXT, width, height);
-	GlCheck("Error setting renderbuffer storage (color)");
+	GL_CHECK();
 
-	glGenRenderbuffers(1, &gl_.renderBufferDepth);
-	glBindRenderbuffer(GL_RENDERBUFFER, gl_.renderBufferDepth);
+	gl_.renderBufferDepth = GLRenderbuffer::Create();
+	glBindRenderbuffer(GL_RENDERBUFFER, gl_.renderBufferDepth.GetHandle());
 	glRenderbufferStorageMultisampleANGLE(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8_OES, width, height);
-	GlCheck("Error setting renderbuffer storage (depth-stencil)");
+	GL_CHECK();
 
-	glGenFramebuffers(1, &gl_.fbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, gl_.renderBuffer);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, gl_.renderBufferDepth);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, gl_.renderBufferDepth);
-	GlCheck("Error making multisampled framebuffer");
+	gl_.fbo = GLFramebuffer::Create();
+	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo.GetHandle());
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, gl_.renderBuffer.GetHandle());
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, gl_.renderBufferDepth.GetHandle());
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, gl_.renderBufferDepth.GetHandle());
+	GL_CHECK();
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void GlContextANGLE::CreateTextureFBO(uint32_t width, uint32_t height, GLuint& fbo, GLuint& texture)
+void GlContextANGLE::CreateTextureFBO(uint32_t width, uint32_t height, GLFramebuffer& fbo, GLTexture& texture)
 {
-	glGenTextures(1, &texture);
-	glBindTexture(GL_TEXTURE_2D, texture);
+	texture = GLTexture::Create();
+	glBindTexture(GL_TEXTURE_2D, texture.GetHandle());
 	glTexStorage2DEXT(GL_TEXTURE_2D, 1, GL_BGRA8_EXT, width, height);
-	GlCheck("Error making render texture");
+	GL_CHECK();
 
-	glGenFramebuffers(1, &fbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-	GlCheck("Error making texture framebuffer");
+	fbo = GLFramebuffer::Create();
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo.GetHandle());
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture.GetHandle(), 0);
+	GL_CHECK();
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo.GetHandle());
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void GlContextANGLE::Blit(GLuint fboFrom, GLuint fboTo)
+void GlContextANGLE::Blit(const GLFramebuffer& fboFrom, const GLFramebuffer& fboTo)
 {
-	glBindFramebuffer(GL_READ_FRAMEBUFFER_ANGLE, fboFrom);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER_ANGLE, fboTo);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER_ANGLE, fboFrom.GetHandle());
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER_ANGLE, fboTo.GetHandle());
 	glBlitFramebufferANGLE(0, 0, GetSurfaceWidth(), GetSurfaceHeight(),
 		0, 0, GetSurfaceWidth(), GetSurfaceHeight(),
 		GL_COLOR_BUFFER_BIT, GL_NEAREST);
-	GlCheck("Error resolving multisampled framebuffer");
+	GL_CHECK();
 }
 
 std::unique_ptr<IGlContext> CreateFullscreenGlContext(uint32_t width, uint32_t height, uint32_t samples)

@@ -1,10 +1,10 @@
 #pragma once
 
+#include "GlContext.h"
+
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
-
-#include "GlContext.h"
 
 #include <string>
 #include <vector>
@@ -57,55 +57,6 @@ struct Settings
 
 class Renderer
 {
-	struct GLData
-	{
-		GLData();
-		~GLData();
-
-		GLuint mainProgram;
-		GLuint mainVertexPosAttrib;
-		GLuint mainTransformUniform;
-		GLuint mainMirrorUniform;
-
-		GLuint maskProgram;
-		GLuint maskVertexPosAttrib;
-		GLuint maskWVPTransformUniform;
-		GLuint maskWVTransformUniform;
-		GLuint maskTextureUniform;
-		GLuint maskPlateSizeUniform;
-		
-		std::array<GLuint, 2> machineMaskTexture;
-
-		std::vector<GLuint> vBuffers;
-		std::vector<GLuint> iBuffers;
-
-		struct TriangleData
-		{
-			TriangleData() :
-				frontFacing(0), orthoFacing(0), backFacing(0)
-			{
-			}
-			TriangleData(GLsizei frontFacing, GLsizei orthoFacing, GLsizei backFacing) :
-				frontFacing(frontFacing), orthoFacing(orthoFacing), backFacing(backFacing)
-			{
-			}
-			GLsizei frontFacing;
-			GLsizei orthoFacing;
-			GLsizei backFacing;
-		};
-		std::vector<TriangleData> iCount;
-	};
-
-	struct ModelData
-	{
-		ModelData() : pos()
-		{
-		}
-
-		float pos;
-		glm::vec3 min;
-		glm::vec3 max;
-	};
 public:
 	Renderer(const Settings& settings);
 	~Renderer();
@@ -122,18 +73,77 @@ public:
 	void MirrorY();
 
 private:
+	struct ModelData
+	{
+		ModelData() : pos()
+		{
+		}
+
+		float pos;
+		glm::vec3 min;
+		glm::vec3 max;
+	};
+
+	struct TriangleData
+	{
+		TriangleData() :
+			frontFacing(0), orthoFacing(0), backFacing(0)
+		{
+		}
+		TriangleData(GLsizei frontFacing, GLsizei orthoFacing, GLsizei backFacing) :
+			frontFacing(frontFacing), orthoFacing(orthoFacing), backFacing(backFacing)
+		{
+		}
+		GLsizei frontFacing;
+		GLsizei orthoFacing;
+		GLsizei backFacing;
+	};
+
 	void CreateGeometryBuffers();
 	void LoadMasks();
 
 	void Render();
 	void RenderCommon();
+	void Combine();
 	void RenderOffscreen();
 	void RenderFullscreen();
 
 	void Model(const glm::mat4x4& wvpMatrix);
 	void Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix);
 
-	GLData glData_;
+	GLProgram mainProgram_;
+	GLuint mainVertexPosAttrib_;
+	GLuint mainTransformUniform_;
+	GLuint mainMirrorUniform_;
+
+	GLProgram maskProgram_;
+	GLuint maskVertexPosAttrib_;
+	GLuint maskWVPTransformUniform_;
+	GLuint maskWVTransformUniform_;
+	GLuint maskTextureUniform_;
+	GLuint maskPlateSizeUniform_;
+
+	GLProgram combineProgram_;
+	GLuint combineVertexPosAttrib_;
+	GLuint combineNormalTextureUniform_;
+	GLuint combineMirrorTextureUniform_;
+	GLuint combineTexelSizeUniform_;
+
+	GLTexture machineMaskTexture_[2];
+
+	GLTexture whiteTexture_;
+
+	GLFramebuffer normalImageFBO_;
+	GLTexture normalImageTexture_;
+
+	GLFramebuffer mirrorImageFBO_;
+	GLTexture mirrorImageTexture_;
+
+	std::vector<GLBuffer> vBuffers_;
+	std::vector<GLBuffer> iBuffers_;
+
+	std::vector<TriangleData> iCount_;
+
 	ModelData model_;
 	Settings settings_;
 	uint32_t curMask_;

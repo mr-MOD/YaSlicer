@@ -162,7 +162,7 @@ std::vector<uint8_t> GlContextRPi::GetRaster()
 
 	glPixelStorei(GL_PACK_ALIGNMENT, 1);
 	glReadPixels(0, 0, GetSurfaceWidth(), GetSurfaceHeight(), GL_RGBA, GL_UNSIGNED_BYTE, tempPixelBuffer_.data());
-	GlCheck("Error reading gl surface data");
+	GL_CHECK();
 
 	std::vector<uint8_t> retVal(GetSurfaceWidth() * GetSurfaceHeight());
 	for (auto i = 0u; i < tempPixelBuffer_.size(); i += FBOBytesPerPixel)
