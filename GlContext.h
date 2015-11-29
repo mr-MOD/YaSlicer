@@ -116,6 +116,7 @@ struct IGlContext
 	virtual void SetRaster(const std::vector<uint8_t>& raster, uint32_t width, uint32_t height) = 0;
 
 	virtual void SwapBuffers() = 0;
+	virtual void ResetFBO() = 0;
 
 	virtual void CreateTextureFBO(GLFramebuffer& fbo, GLTexture& texture) = 0;
 	virtual void Resolve(const GLFramebuffer& fboTo) = 0;

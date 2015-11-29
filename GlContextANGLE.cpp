@@ -143,7 +143,10 @@ std::vector<uint8_t> GlContextANGLE::GetRaster()
 		tempPixelBuffer_.resize(GetSurfaceWidth() * GetSurfaceHeight() * FBOBytesPerPixel);
 	}
 
-	Blit(gl_.fbo, GLFramebuffer(0));
+	GLint currentFBO = 0;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFBO);
+	Blit(currentFBO, 0);
+
 	glBindFramebuffer(GL_READ_FRAMEBUFFER_ANGLE, 0);
 	glPixelStorei(GL_PACK_ALIGNMENT, 1);
 	glReadPixels(0, 0, GetSurfaceWidth(), GetSurfaceHeight(), GL_RGBA, GL_UNSIGNED_BYTE, tempPixelBuffer_.data());
@@ -155,7 +158,7 @@ std::vector<uint8_t> GlContextANGLE::GetRaster()
 		retVal[i / FBOBytesPerPixel] = tempPixelBuffer_[i];
 	}
 
-	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo.GetHandle());
+	glBindFramebuffer(GL_FRAMEBUFFER, currentFBO);
 	return retVal;
 }
 
@@ -168,6 +171,11 @@ void GlContextANGLE::SwapBuffers()
 {
 	Blit(gl_.fbo, GLFramebuffer(0));
 	eglSwapBuffers(gl_.display, gl_.surface);
+}
+
+void GlContextANGLE::ResetFBO()
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo.GetHandle());
 }
 
 void GlContextANGLE::CreateTextureFBO(GLFramebuffer& fbo, GLTexture& texture)
@@ -219,14 +227,19 @@ void GlContextANGLE::CreateTextureFBO(uint32_t width, uint32_t height, GLFramebu
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void GlContextANGLE::Blit(const GLFramebuffer& fboFrom, const GLFramebuffer& fboTo)
+void GlContextANGLE::Blit(GLuint fboFrom, GLuint fboTo)
 {
-	glBindFramebuffer(GL_READ_FRAMEBUFFER_ANGLE, fboFrom.GetHandle());
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER_ANGLE, fboTo.GetHandle());
+	glBindFramebuffer(GL_READ_FRAMEBUFFER_ANGLE, fboFrom);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER_ANGLE, fboTo);
 	glBlitFramebufferANGLE(0, 0, GetSurfaceWidth(), GetSurfaceHeight(),
 		0, 0, GetSurfaceWidth(), GetSurfaceHeight(),
 		GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	GL_CHECK();
+}
+
+void GlContextANGLE::Blit(const GLFramebuffer& fboFrom, const GLFramebuffer& fboTo)
+{
+	Blit(fboFrom.GetHandle(), fboTo.GetHandle());
 }
 
 std::unique_ptr<IGlContext> CreateFullscreenGlContext(uint32_t width, uint32_t height, uint32_t samples)

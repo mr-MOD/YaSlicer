@@ -11,7 +11,7 @@
 
 #define FILE_LINE CONCAT(__FILE__": ", STRINGIZE(__LINE__))
 
-#define ASSERT(x) assert(x)
+#define ASSERT(x) if(!(x)) { MessageBoxA(nullptr, #x, "Assertion failed", MB_ICONERROR | MB_OK); }
 
 #define CHECK(x) if (!(x)) { throw std::runtime_error("Check failed at "FILE_LINE); }
 

@@ -64,7 +64,7 @@ void Binarize(std::vector<uint8_t>& in, uint8_t threshold)
 {
 	for (auto& v : in)
 	{
-		v = v >= threshold ? 255 : 0;
+		v = v >= threshold ? v : 0;
 	}
 }
 

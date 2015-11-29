@@ -18,10 +18,14 @@ private:
 
 	void CreateTextureFBO(GLFramebuffer& fbo, GLTexture& texture) override;
 	void Resolve(const GLFramebuffer& fboTo) override;
+	void ResetFBO() override;
+
+	void Blit(const GLFramebuffer& fboFrom, const GLFramebuffer& fboTo);
+	void Blit(GLuint fboFrom, GLuint fboTo);
 
 	void CreateMultisampledFBO(uint32_t width, uint32_t height, uint32_t samples);
 	void CreateTextureFBO(uint32_t width, uint32_t height, GLFramebuffer& fbo, GLTexture& texture);
-	void Blit(const GLFramebuffer& fboFrom, const GLFramebuffer& fboTo);
+	
 
 	struct GLData
 	{

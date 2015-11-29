@@ -33,8 +33,11 @@ RasterSetter::RasterSetter() :
 	texelSizeUniform_(0), textureUniform_(0), vertexPosAttrib_(0)
 {
 	texelSizeUniform_ = glGetUniformLocation(program_.GetHandle(), "texelSize");
+	ASSERT(texelSizeUniform_ != -1);
 	textureUniform_ = glGetUniformLocation(program_.GetHandle(), "texture");
+	ASSERT(textureUniform_ != -1);
 	vertexPosAttrib_ = glGetAttribLocation(program_.GetHandle(), "vPosition");
+	ASSERT(vertexPosAttrib_ != -1);
 
 	GL_CHECK();
 }

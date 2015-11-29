@@ -9,109 +9,24 @@
 #include "Png.h"
 #include "Loaders.h"
 #include "Raster.h"
-#include "GlContext.h"
+#include "Shaders.h"
 
 #include <stdexcept>
 #include <numeric>
 #include <fstream>
+#include <sstream>
 #include <iostream>
+#include <iomanip>
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <thread>
 #include <cerrno>
 
-const std::string VShader = SHADER
-(
-	precision mediump float;
-
-	attribute vec3 vPosition;
-	uniform mat4 wvp;
-	uniform vec2 mirror;
-	void main()
-	{
-		gl_Position = wvp * vec4(vPosition, 1);
-		gl_Position.xy = gl_Position.xy * mirror;
-	}
-);
-
-const std::string FShader = SHADER
-(
-	precision mediump float;
-
-	void main()
-	{
-		gl_FragColor = vec4(1);
-	}
-);
-
-//////////////////////////////////////
-
-const std::string MaskVShader = SHADER
-(
-	precision mediump float;
-	attribute vec3 vPosition;
-
-	uniform vec2 plateSize;
-	uniform mat4 wv;
-	uniform mat4 wvp;
-
-	varying vec2 texCoord;
-	void main()
-	{
-		gl_Position = wvp * vec4(vPosition, 1);
-		texCoord = ((wv * vec4(vPosition, 1)).xy + plateSize * 0.5) / plateSize;
-	}
-);
-
-const std::string MaskFShader = SHADER
-(
-	precision mediump float;
-
-	varying vec2 texCoord;
-	uniform sampler2D maskTexture;
-
-	void main()
-	{
-		gl_FragColor = texture2D(maskTexture, texCoord);
-	}
-);
-
-//////////////////////////////////////
-
-const std::string CombineVShader = SHADER
-(
-	precision mediump float;
-	uniform vec2 texelSize;
-	attribute vec2 vPosition;
-	varying vec2 normalTexCoord;
-	varying vec2 mirrorTexCoord;
-	
-	void main()
-	{
-		gl_Position = vec4(vPosition, 0, 1);
-		vec2 baseTexCoord = (vPosition + vec2(1, 1)) * 0.5;
-		normalTexCoord = baseTexCoord;
-		mirrorTexCoord = (vec2(1,1) - baseTexCoord);
-	}
-);
-
-const std::string CombineFShader = SHADER
-(
-	precision mediump float;
-
-	varying vec2 normalTexCoord;
-	varying vec2 mirrorTexCoord;
-	uniform sampler2D normalTexture;
-	uniform sampler2D mirrorTexture;
-
-	void main()
-	{
-		vec4 normal = texture2D(normalTexture, normalTexCoord);
-		vec4 mirror = texture2D(mirrorTexture, mirrorTexCoord);
-		gl_FragColor = normal + mirror;
-	}
-);
+namespace
+{
+	bool HasOverhangs(const std::vector<uint8_t>& raster, uint32_t width, uint32_t height);
+}
 
 
 Renderer::Renderer(const Settings& settings) :
@@ -127,14 +42,7 @@ maskVertexPosAttrib_(0),
 maskWVTransformUniform_(0),
 maskWVPTransformUniform_(0),
 maskTextureUniform_(0),
-maskPlateSizeUniform_(0),
-
-combineVertexPosAttrib_(0),
-combineNormalTextureUniform_(0),
-combineMirrorTextureUniform_(0),
-combineTexelSizeUniform_(0),
-
-whiteTexture_(GLTexture::Create())
+maskPlateSizeUniform_(0)
 {
 	if (settings_.offscreen)
 	{
@@ -147,27 +55,39 @@ whiteTexture_(GLTexture::Create())
 
 	mainProgram_ = CreateProgram(CreateVertexShader(VShader), CreateFragmentShader(FShader));
 	mainTransformUniform_ = glGetUniformLocation(mainProgram_.GetHandle(), "wvp");
+	ASSERT(mainTransformUniform_ != -1);
 	mainMirrorUniform_ = glGetUniformLocation(mainProgram_.GetHandle(), "mirror");
+	ASSERT(mainMirrorUniform_ != -1);
 	mainVertexPosAttrib_ = glGetAttribLocation(mainProgram_.GetHandle(), "vPosition");
+	ASSERT(mainVertexPosAttrib_ != -1);
 	GL_CHECK();
 
 	maskProgram_ = CreateProgram(CreateVertexShader(MaskVShader), CreateFragmentShader(MaskFShader));
 	maskWVTransformUniform_ = glGetUniformLocation(maskProgram_.GetHandle(), "wv");
+	ASSERT(maskWVTransformUniform_ != -1);
 	maskWVPTransformUniform_ = glGetUniformLocation(maskProgram_.GetHandle(), "wvp");
+	ASSERT(maskWVPTransformUniform_ != -1);
 	maskPlateSizeUniform_ = glGetUniformLocation(maskProgram_.GetHandle(), "plateSize");
+	ASSERT(maskPlateSizeUniform_ != -1);
 	maskTextureUniform_ = glGetUniformLocation(maskProgram_.GetHandle(), "maskTexture");
+	ASSERT(maskTextureUniform_ != -1);
 	maskVertexPosAttrib_ = glGetAttribLocation(maskProgram_.GetHandle(), "vPosition");
+	ASSERT(maskVertexPosAttrib_ != -1);
 	GL_CHECK();
 
-	combineProgram_ = CreateProgram(CreateVertexShader(CombineVShader), CreateFragmentShader(CombineFShader));
-	combineNormalTextureUniform_ = glGetUniformLocation(combineProgram_.GetHandle(), "normalTexture");
-	combineMirrorTextureUniform_ = glGetUniformLocation(combineProgram_.GetHandle(), "mirrorTexture");
-	combineTexelSizeUniform_ = glGetUniformLocation(combineProgram_.GetHandle(), "texelSize");
-	combineVertexPosAttrib_ = glGetAttribLocation(combineProgram_.GetHandle(), "vPosition");
-	GL_CHECK();
+	axialDilateProgram_ = CreateProgram(CreateVertexShader(Filter2DVShader), CreateFragmentShader(AxialDilateFShader));
+	omniDilateProgram_ = CreateProgram(CreateVertexShader(Filter2DVShader), CreateFragmentShader(OmniDilateFShader));
+	binarizeProgram_ = CreateProgram(CreateVertexShader(Filter2DVShader), CreateFragmentShader(BinarizeFShader));
+	differenceProgram_ = CreateProgram(CreateVertexShader(Filter2DVShader), CreateFragmentShader(DifferenceFShader));
+	
+	whiteTexture_ = GLTexture::Create();
 
-	glContext_->CreateTextureFBO(mirrorImageFBO_, mirrorImageTexture_);
-	glContext_->CreateTextureFBO(normalImageFBO_, normalImageTexture_);
+	glContext_->CreateTextureFBO(imageFBO_, imageTexture_);
+	glContext_->CreateTextureFBO(previousLayerImageFBO_, previousLayerImageTexture_);
+	White();
+	glContext_->Resolve(previousLayerImageFBO_);
+	glContext_->CreateTextureFBO(differenceFBO_, differenceTexture_);
+	GL_CHECK();
 
 	const uint32_t WhiteOpaquePixel = 0xFFFFFFFF;
 	glBindTexture(GL_TEXTURE_2D, whiteTexture_.GetHandle());
@@ -183,9 +103,9 @@ whiteTexture_(GLTexture::Create())
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	glEnable(GL_CULL_FACE);
-	glDisable(GL_DEPTH_TEST);
+	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_ALWAYS);
-	glDepthMask(GL_FALSE);
+	glDepthMask(GL_TRUE);
 
 	CreateGeometryBuffers();
 	LoadMasks();
@@ -268,7 +188,7 @@ void Renderer::Black()
 	glViewport(0, 0, settings_.renderWidth, settings_.renderHeight);
 
 	glClearColor(0.0, 0.0, 0.0, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 	glFlush();
 
 	if (!settings_.offscreen)
@@ -282,7 +202,7 @@ void Renderer::White()
 	glViewport(0, 0, settings_.renderWidth, settings_.renderHeight);
 
 	glClearColor(1.0, 1.0, 1.0, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 	glFlush();
 
 	if (!settings_.offscreen)
@@ -322,7 +242,7 @@ void Renderer::RenderCommon()
 
 	auto view = glm::lookAt(glm::vec3(middle.x, middle.y, model_.pos),
 		glm::vec3(middle.x, middle.y, model_.max.z + 1.0f),
-		glm::vec3(0, 1.0f, 0));
+		glm::vec3(0, -1.0f, 0));
 	auto proj = glm::ortho(-settings_.plateHeight * 0.5f * aspect, settings_.plateHeight * 0.5f * aspect,
 		-settings_.plateHeight * 0.5f, settings_.plateHeight * 0.5f,
 		0.0f, extent.z);
@@ -332,52 +252,27 @@ void Renderer::RenderCommon()
 
 	GL_CHECK();
 
-	mirror_.x *= -1;
-	mirror_.y *= -1;
 	Model(wvpMatrix);
 	Mask(wvpMatrix, wvMatrix);
-	glContext_->Resolve(mirrorImageFBO_);
-
-	mirror_.x *= -1;
-	mirror_.y *= -1;
-	Model(wvpMatrix);
-	Mask(wvpMatrix, wvMatrix);
-	glContext_->Resolve(normalImageFBO_);
-
-	Combine();
-
-	raster_.clear();
-	decltype(raster_) rasterDilate;
 
 	if (settings_.doAxialDilate)
 	{
-		raster_ = glContext_->GetRaster();
-		rasterDilate.resize(raster_.size());
-		DilateAxial(raster_, rasterDilate, settings_.renderWidth, settings_.renderHeight);
-		raster_.swap(rasterDilate);
+		glContext_->Resolve(imageFBO_);
+		RenderAxialDilate();
 	}
 
-	auto currentSlice = static_cast<uint32_t>((model_.pos - model_.min.z) / settings_.step + 0.5f);
+	auto currentSlice = GetCurrentSlice();
 	if (settings_.doOmniDirectionalDilate && currentSlice % settings_.omniDilateSliceFactor == 0)
 	{
-		if (raster_.empty())
-		{
-			raster_ = glContext_->GetRaster();
-		}
-		
-		rasterDilate.resize(raster_.size());
-		ScaledDilate(raster_, rasterDilate, settings_.renderWidth, settings_.renderHeight, settings_.omniDilateScale);
-		raster_.swap(rasterDilate);
+		const auto KernelSize = 3;
+		glContext_->Resolve(imageFBO_);
+		RenderOmniDilate(settings_.omniDilateScale, KernelSize);
 	}
 
 	if (settings_.doBinarize)
 	{
-		if (raster_.empty())
-		{
-			raster_ = glContext_->GetRaster();
-		}
-
-		Binarize(raster_, settings_.binarizeThreshold);
+		glContext_->Resolve(imageFBO_);
+		RenderBinarize(settings_.binarizeThreshold);
 	}
 }
 
@@ -389,11 +284,6 @@ void Renderer::RenderOffscreen()
 void Renderer::RenderFullscreen()
 {
 	RenderCommon();
-
-	if (settings_.doAxialDilate || settings_.doOmniDirectionalDilate)
-	{
-		glContext_->SetRaster(raster_, settings_.renderWidth, settings_.renderHeight);
-	}
 	glContext_->SwapBuffers();
 }
 
@@ -403,7 +293,7 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 
 	glClearColor(0.0, 0.0, 0.0, 1.0);
 	glClearStencil(0x80);
-	glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
 	glEnable(GL_STENCIL_TEST);
@@ -475,7 +365,7 @@ void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix)
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, machineMaskTexture_[curMask_].GetHandle());
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 	glUniform1i(maskTextureUniform_, 0);
@@ -484,31 +374,103 @@ void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix)
 	GL_CHECK();
 }
 
-void Renderer::Combine()
+uint32_t Renderer::GetCurrentSlice() const
+{
+	return static_cast<uint32_t>(std::max((model_.pos - model_.min.z) / settings_.step + 0.5f - 1, 0.0f));
+}
+
+uint32_t Renderer::GetCurrentSliceERM() const
+{
+	return GetCurrentSlice() * (settings_.enableERM ? 2 : 1);
+}
+
+void Renderer::RenderAxialDilate()
+{
+	Render2DFilter(axialDilateProgram_);
+}
+
+void Renderer::RenderOmniDilate(float scale, uint32_t kernelSize)
+{
+	UniformSetters omniUniforms
+	{
+		[scale, kernelSize](const GLProgram& program)
+		{
+			const auto scaleUniform = glGetUniformLocation(program.GetHandle(), "scale");
+			ASSERT(scaleUniform != -1);
+			glUniform1f(scaleUniform, scale);
+
+			const auto kernelSizeUniform = glGetUniformLocation(program.GetHandle(), "kernelSize");
+			ASSERT(kernelSizeUniform != -1);
+			glUniform1f(kernelSizeUniform, static_cast<float>(kernelSize));
+		}
+	};
+	Render2DFilter(omniDilateProgram_, omniUniforms);
+}
+
+void Renderer::RenderBinarize(uint32_t threshold)
+{
+	UniformSetters binarizeUniforms
+	{
+		[threshold](const GLProgram& program)
+		{
+			const auto thresholdUniform = glGetUniformLocation(program.GetHandle(), "threshold");
+			ASSERT(thresholdUniform != -1);
+			glUniform1f(thresholdUniform, std::max(1.0f, threshold / 255.0f));
+		}
+	};
+	Render2DFilter(binarizeProgram_, binarizeUniforms);
+}
+
+void Renderer::RenderDifference()
+{
+	UniformSetters differenceUniforms
+	{
+		[this](const GLProgram& program)
+		{
+			const auto previousLayerTextureUniform = glGetUniformLocation(program.GetHandle(), "previousLayerTexture");
+			ASSERT(previousLayerTextureUniform != -1);
+			glUniform1i(previousLayerTextureUniform, 1);
+
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, this->previousLayerImageTexture_.GetHandle());
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		}
+	};
+	Render2DFilter(differenceProgram_, differenceUniforms);
+}
+
+void Renderer::Render2DFilter(const GLProgram& program, const UniformSetters& additionalUniformSetters)
 {
 	glViewport(0, 0, settings_.renderWidth, settings_.renderHeight);
 
+	glDisable(GL_STENCIL_TEST);
 	glCullFace(GL_FRONT);
 
 	glClearColor(0.0, 0.0, 0.0, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-	glUseProgram(combineProgram_.GetHandle());
+	glUseProgram(program.GetHandle());
+	const auto textureUniform = glGetUniformLocation(program.GetHandle(), "texture");
+	ASSERT(textureUniform != -1);
+	const auto texelSizeUniform = glGetUniformLocation(program.GetHandle(), "texelSize");
+	const auto vertexPosAttrib = glGetAttribLocation(program.GetHandle(), "vPosition");
+	ASSERT(vertexPosAttrib != -1);
+	GL_CHECK();
+
+	for (const auto& s : additionalUniformSetters)
+	{
+		s(program);
+	}
+	GL_CHECK();
 
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, normalImageTexture_.GetHandle());
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glBindTexture(GL_TEXTURE_2D, imageTexture_.GetHandle());
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, mirrorImageTexture_.GetHandle());
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	glUniform1i(combineNormalTextureUniform_, 0);
-	glUniform1i(combineMirrorTextureUniform_, 1);
-
-	glUniform2f(combineTexelSizeUniform_, 1.0f / settings_.renderWidth, 1.0f / settings_.renderHeight);
+	glUniform1i(textureUniform, 0);
+	glUniform2f(texelSizeUniform, 1.0f / settings_.renderWidth, 1.0f / settings_.renderHeight);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	const float quad[] =
@@ -521,8 +483,8 @@ void Renderer::Combine()
 		1, 1,
 		1, -1
 	};
-	glVertexAttribPointer(combineVertexPosAttrib_, 2, GL_FLOAT, GL_FALSE, 0, quad);
-	glEnableVertexAttribArray(combineVertexPosAttrib_);
+	glVertexAttribPointer(vertexPosAttrib, 2, GL_FLOAT, GL_FALSE, 0, quad);
+	glEnableVertexAttribArray(vertexPosAttrib);
 	glDrawArrays(GL_TRIANGLES, 0, _countof(quad) / 2);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -576,6 +538,47 @@ void Renderer::MirrorY()
 	Render();
 }
 
+void Renderer::ERM()
+{
+	struct ScopedCorrect
+	{
+		ScopedCorrect(Settings& settings) : settings(settings)
+		{
+			settings.modelOffset.x -= 0.5f;
+			settings.modelOffset.y -= 0.5f;
+		}
+		~ScopedCorrect()
+		{
+			settings.modelOffset.x += 0.5f;
+			settings.modelOffset.y += 0.5f;
+		}
+		Settings& settings;
+	} scope(settings_);
+	
+	Render();
+}
+
+void Renderer::AnalyzeOverhangs()
+{
+	glContext_->Resolve(imageFBO_);
+	glBindFramebuffer(GL_FRAMEBUFFER, differenceFBO_.GetHandle());
+	RenderDifference();
+	raster_ = glContext_->GetRaster();
+	if (HasOverhangs(raster_, glContext_->GetSurfaceWidth(), glContext_->GetSurfaceHeight()))
+	{
+		std::cout << "Has overhangs at layer: " << GetCurrentSliceERM() << "\n";
+		std::stringstream s;
+		s << settings_.outputDir << std::setfill('0') << std::setw(5) << GetCurrentSliceERM() << "_overhangs.png";
+		SavePng(s.str());
+	}
+	raster_.clear();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, previousLayerImageFBO_.GetHandle());
+	const auto supportedPixels = static_cast<uint32_t>(ceil(settings_.maxSupportedDistance * settings_.renderWidth / settings_.plateWidth));
+	RenderOmniDilate(1.0f, supportedPixels * 2 + 1);
+	glContext_->ResetFBO();
+}
+
 void Renderer::LoadMasks()
 {
 	for (auto i = 0u; i < settings_.machineMaskFile.size(); ++i)
@@ -598,4 +601,22 @@ void Renderer::LoadMasks()
 	}
 
 	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+namespace
+{
+
+	bool HasOverhangs(const std::vector<uint8_t>& raster, uint32_t width, uint32_t height)
+	{
+		const auto Threshold = 255;
+		for (auto v : raster)
+		{
+			if (v >= Threshold)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 }

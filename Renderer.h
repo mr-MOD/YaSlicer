@@ -22,7 +22,8 @@ struct Settings
 		queue(std::max(1u, std::thread::hardware_concurrency())),
 		plateWidth(96.0f), plateHeight(54.0f),
 		doAxialDilate(true), doOmniDirectionalDilate(false), omniDilateSliceFactor(1), omniDilateScale(1.0f),
-		modelOffset(0), optimizeMesh(true), doBinarize(false), binarizeThreshold(0) {}
+		modelOffset(0), optimizeMesh(true), doBinarize(false), binarizeThreshold(0),
+		doOverhangAnalysis(false), maxSupportedDistance(0.1f), enableERM(false) {}
 
 	bool offscreen;
 	std::string modelFile;
@@ -53,6 +54,11 @@ struct Settings
 	glm::vec2 modelOffset;
 
 	bool optimizeMesh;
+
+	bool doOverhangAnalysis;
+	float maxSupportedDistance;
+
+	bool enableERM;
 };
 
 class Renderer
@@ -71,6 +77,8 @@ public:
 	void SetMask(uint32_t n);
 	void MirrorX();
 	void MirrorY();
+	void ERM();
+	void AnalyzeOverhangs();
 
 private:
 	struct ModelData
@@ -99,17 +107,27 @@ private:
 		GLsizei backFacing;
 	};
 
+	using UniformSetterType = std::function<void(const GLProgram&)>;
+	using UniformSetters = std::vector<UniformSetterType>;
+
 	void CreateGeometryBuffers();
 	void LoadMasks();
 
 	void Render();
 	void RenderCommon();
-	void Combine();
+	void RenderAxialDilate();
+	void RenderOmniDilate(float scale, uint32_t kernelSize);
+	void RenderBinarize(uint32_t threshold);
+	void RenderDifference();
+	void Render2DFilter(const GLProgram& program, const UniformSetters& additionalUniformSetters = UniformSetters());
 	void RenderOffscreen();
 	void RenderFullscreen();
 
 	void Model(const glm::mat4x4& wvpMatrix);
 	void Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix);
+
+	uint32_t GetCurrentSlice() const;
+	uint32_t GetCurrentSliceERM() const;
 
 	GLProgram mainProgram_;
 	GLuint mainVertexPosAttrib_;
@@ -123,21 +141,23 @@ private:
 	GLuint maskTextureUniform_;
 	GLuint maskPlateSizeUniform_;
 
-	GLProgram combineProgram_;
-	GLuint combineVertexPosAttrib_;
-	GLuint combineNormalTextureUniform_;
-	GLuint combineMirrorTextureUniform_;
-	GLuint combineTexelSizeUniform_;
+	GLProgram axialDilateProgram_;
+	GLProgram omniDilateProgram_;
+	GLProgram binarizeProgram_;
+	GLProgram differenceProgram_;
 
 	GLTexture machineMaskTexture_[2];
 
 	GLTexture whiteTexture_;
 
-	GLFramebuffer normalImageFBO_;
-	GLTexture normalImageTexture_;
+	GLFramebuffer imageFBO_;
+	GLTexture imageTexture_;
 
-	GLFramebuffer mirrorImageFBO_;
-	GLTexture mirrorImageTexture_;
+	GLFramebuffer previousLayerImageFBO_;
+	GLTexture previousLayerImageTexture_;
+
+	GLFramebuffer differenceFBO_;
+	GLTexture differenceTexture_;
 
 	std::vector<GLBuffer> vBuffers_;
 	std::vector<GLBuffer> iBuffers_;
