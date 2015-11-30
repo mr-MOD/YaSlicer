@@ -168,7 +168,7 @@ uint32_t Renderer::GetLayersCount() const
 
 void Renderer::FirstSlice()
 {
-	model_.pos = model_.min.z + settings_.step;
+	model_.pos = model_.min.z + settings_.step/2;
 	Render();
 }
 
