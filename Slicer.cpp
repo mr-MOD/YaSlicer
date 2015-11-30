@@ -11,6 +11,7 @@
 #include <thread>
 #include <chrono>
 #include <regex>
+#include <codecvt>
 
 const auto SliceFileDigits = 5;
 const char * BasePlateFilename = "base_plate.png";
@@ -191,7 +192,7 @@ std::string GenLayerConfig(const std::string& layerTemplate, const std::string& 
 	std::string layerFileName;
 	if (!isBaseLayer)
 	{
-		const auto slice = (layerNumber - 1) / 2;
+		const auto slice = settings.enableERM ? ((layerNumber - 1) / 2) : (layerNumber - 1);
 		layerFileName = settings.enableERM ? GetERMFileName(settings, slice, true) : GetOutputFileName(settings, slice);
 	}
 	else
@@ -245,10 +246,15 @@ void WriteEnvisiontechConfig(const Settings& settings, const std::string& fileNa
 	job = ReplaceAll(job, "#FIRST_LAYER#", firstLayer);
 	job = ReplaceAll(job, "#LAYERS#", layers);
 
-	std::fstream file(settings.outputDir + fileName, std::ios::out);
+	std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> convert;
+	std::u16string out = convert.from_bytes(job);
+
+	std::fstream file(settings.outputDir + fileName, std::ios::out | std::ios::binary);
 	CHECK(file.good());
 
-	file.write(reinterpret_cast<const char*>(job.c_str()), job.length()*sizeof(job[0]));
+	const char16_t ByteOrderMark = 0xFEFF;
+	file.write(reinterpret_cast<const char*>(&ByteOrderMark), sizeof(ByteOrderMark));
+	file.write(reinterpret_cast<const char*>(out.c_str()), out.length() * sizeof(out[0]));
 	CHECK(file.good());
 }
 
