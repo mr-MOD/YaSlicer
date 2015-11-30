@@ -258,53 +258,50 @@ void WriteEnvisiontechConfig(const Settings& settings, const std::string& fileNa
 	CHECK(file.good());
 }
 
-void RenderCommand(std::istream& s, Renderer& r, const Settings& settings)
+void RenderCommand(std::istream& s, const std::string& command, Renderer& r, const Settings& settings)
 {
-	std::string str;
-	s >> str;
-
-	if (str == "NumLayers")
+	if (command == "NumLayers")
 	{
-		std::cout << r.GetLayersCount() << std::endl;
+		std::cout << r.GetLayersCount();
 	}
-	else if (str == "Black")
+	else if (command == "Black")
 	{
 		r.Black();
 	}
-	else if (str == "White")
+	else if (command == "White")
 	{
 		r.White();
 	}
-	else if (str == "FirstSlice")
+	else if (command == "FirstSlice")
 	{
 		r.FirstSlice();
 	}
-	else if (str == "NextSlice")
+	else if (command == "NextSlice")
 	{
 		r.NextSlice();
 	}
-	else if (str == "Mask")
+	else if (command == "Mask")
 	{
 		uint32_t mask= 0;
 		s >> mask;
 		mask = std::min(1u, mask);
 		r.SetMask(mask);
 	}
-	else if (str == "Sleep")
+	else if (command == "Sleep")
 	{
 		uint32_t delay = 0;
 		s >> delay;
 		std::this_thread::sleep_for(std::chrono::milliseconds(delay));
 	}
-	else if (str == "MirrorX")
+	else if (command == "MirrorX")
 	{
 		r.MirrorX();
 	}
-	else if (str == "MirrorY")
+	else if (command == "MirrorY")
 	{
 		r.MirrorY();
 	}
-	else if (str == "SliceModel")
+	else if (command == "SliceModel")
 	{
 		auto tStart = std::chrono::high_resolution_clock::now();
 
@@ -343,6 +340,31 @@ void RenderCommand(std::istream& s, Renderer& r, const Settings& settings)
 	}
 }
 
+void RenderCommands(std::istream& in, Renderer& r, const Settings& settings)
+{
+	std::string command;
+	while (!in.eof())
+	{
+		in >> command;
+		command = Trim(command);
+		if (command.empty())
+		{
+			continue;
+		}
+		
+		if (command[0] != '#')
+		{
+			RenderCommand(in, command, r, settings);
+			std::cout << command << " is done" << std::endl;
+		}
+		else
+		{
+			std::getline(in, command);
+		}
+		command.clear();
+	}
+}
+
 int main(int argc, char** argv)
 {
 	try
@@ -351,12 +373,7 @@ int main(int argc, char** argv)
 		ReadSettings(std::cin, settings);
 
 		Renderer r(settings);
-
-		while (!std::cin.eof())
-		{
-			RenderCommand(std::cin, r, settings);
-			std::cout << "done" << std::endl;
-		}
+		RenderCommands(std::cin, r, settings);
 	}
 	catch (const std::exception& e)
 	{
