@@ -42,7 +42,9 @@ maskVertexPosAttrib_(0),
 maskWVTransformUniform_(0),
 maskWVPTransformUniform_(0),
 maskTextureUniform_(0),
-maskPlateSizeUniform_(0)
+maskPlateSizeUniform_(0),
+
+palette_(CreateGrayscalePalette())
 {
 	if (settings_.offscreen)
 	{
@@ -505,8 +507,9 @@ void Renderer::SavePng(const std::string& fileName)
 
 	const auto targetWidth = settings_.renderWidth;
 	const auto targetHeight = settings_.renderHeight;
-	auto future = std::async([pixData, fileName, targetWidth, targetHeight]() {
-		WritePng(fileName, targetWidth, targetHeight, *pixData);
+	auto future = std::async([pixData, fileName, targetWidth, targetHeight, this]() {
+		const auto BitsPerChannel = 8;
+		WritePng(fileName, targetWidth, targetHeight, BitsPerChannel, *pixData, this->palette_);
 	});
 	
 	if (runOnMainThread)

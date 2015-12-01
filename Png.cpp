@@ -3,6 +3,16 @@
 #include <png.h>
 #include <stdexcept>
 
+std::vector<uint32_t> CreateGrayscalePalette()
+{
+	std::vector<uint32_t> palette(256);
+	for (size_t i = 0; i < palette.size(); ++i)
+	{
+		palette[i] = static_cast<uint32_t>((i << 16) | (i << 8) | i);
+	}
+	return palette;
+}
+
 std::vector<uint8_t> ReadPng(const std::string& fileName, uint32_t& width, uint32_t& height, uint32_t& bitsPerPixel)
 {
 	FILE* fp = nullptr;
@@ -102,10 +112,9 @@ std::vector<uint8_t> ReadPng(const std::string& fileName, uint32_t& width, uint3
 	}
 }
 
-void WritePng(const std::string& fileName, uint32_t width, uint32_t height, const std::vector<uint8_t>& pixData)
+void WritePng(const std::string& fileName, uint32_t width, uint32_t height, uint32_t bitsPerChannel,
+	const std::vector<uint8_t>& pixData, const std::vector<uint32_t>& palette)
 {
-	const auto ChannelBitDepth = 8;
-
 	FILE *fp = nullptr;
 	png_structp png_ptr = nullptr;
 	png_infop info_ptr = nullptr;
@@ -139,7 +148,7 @@ void WritePng(const std::string& fileName, uint32_t width, uint32_t height, cons
 		switch (nChannels)
 		{
 		case 1:
-			color_type = PNG_COLOR_TYPE_GRAY;
+			color_type = palette.empty() ? PNG_COLOR_TYPE_GRAY : PNG_COLOR_TYPE_PALETTE;
 			break;
 		case 3:
 			color_type = PNG_COLOR_TYPE_RGB;
@@ -151,10 +160,22 @@ void WritePng(const std::string& fileName, uint32_t width, uint32_t height, cons
 			throw std::runtime_error("Can only write 1, 3 or 4 channel PNG");
 		}
 
+		if (color_type == PNG_COLOR_TYPE_PALETTE)
+		{
+			std::vector<png_color> pngPalette(palette.size());
+			for (size_t i = 0; i < palette.size(); ++i)
+			{
+				pngPalette[i].red = palette[i] & 0xFF;
+				pngPalette[i].green = (palette[i] & 0xFF00) >> 8;
+				pngPalette[i].blue = (palette[i] & 0xFF0000) >> 16;
+			}
+			png_set_PLTE(png_ptr, info_ptr, &pngPalette[0], static_cast<int>(pngPalette.size()));
+		}
+		
 		png_set_IHDR(png_ptr, info_ptr, width, height,
-			ChannelBitDepth, color_type, PNG_INTERLACE_NONE,
+			bitsPerChannel, color_type, PNG_INTERLACE_NONE,
 			PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
-
+		
 		png_write_info(png_ptr, info_ptr);
 
 

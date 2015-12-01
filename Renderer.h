@@ -172,6 +172,7 @@ private:
 	GLenum cullBack_;
 	glm::vec2 mirror_;
 
+	const std::vector<uint32_t> palette_;
 	std::vector<std::future<void>> pngSaveResult_;
 	std::vector<uint8_t> raster_;
 	std::unique_ptr<IGlContext> glContext_;

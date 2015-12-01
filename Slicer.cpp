@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "Png.h"
 #include "ErrorHandling.h"
 
 #include <memory>
@@ -305,9 +306,11 @@ void RenderCommand(std::istream& s, const std::string& command, Renderer& r, con
 	{
 		auto tStart = std::chrono::high_resolution_clock::now();
 
-		r.White();
 		auto filePath = settings.outputDir + BasePlateFilename;
-		r.SavePng(filePath);
+		std::vector<uint8_t> data(settings.renderWidth * settings.renderHeight);
+		const uint8_t WhiteColorPaletteIndex = 0xFF;
+		std::fill(data.begin(), data.end(), WhiteColorPaletteIndex);
+		WritePng(filePath, settings.renderWidth, settings.renderHeight, 8, data, CreateGrayscalePalette());
 
 		uint32_t nSlice = 0;
 		r.FirstSlice();
