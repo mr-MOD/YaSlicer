@@ -23,6 +23,9 @@
 #include <thread>
 #include <cerrno>
 
+#include <boost/filesystem.hpp>
+#include <boost/scope_exit.hpp>
+
 namespace
 {
 	bool HasOverhangs(const std::vector<uint8_t>& raster, uint32_t width, uint32_t height);
@@ -111,6 +114,18 @@ palette_(CreateGrayscalePalette())
 
 	CreateGeometryBuffers();
 	LoadMasks();
+
+	if (settings_.mirrorX)
+	{
+		mirror_.x *= -1;
+		std::swap(cullFront_, cullBack_);
+	}
+
+	if (settings_.mirrorY)
+	{
+		mirror_.y *= -1;
+		std::swap(cullFront_, cullBack_);
+	}
 }
 
 Renderer::~Renderer()
@@ -237,7 +252,7 @@ void Renderer::RenderCommon()
 	auto middle = (model_.min + model_.max) * 0.5f;
 	auto extent = model_.max - model_.min;
 
-	auto offsetX = -(settings_.plateWidth / settings_.renderWidth) * settings_.modelOffset.x;
+	auto offsetX = (settings_.plateWidth / settings_.renderWidth) * settings_.modelOffset.x;
 	auto offsetY = (settings_.plateHeight / settings_.renderHeight) * settings_.modelOffset.y;
 
 	auto model = glm::scale(glm::vec3(1.0f, 1.0f, 1.0f)) * glm::translate(offsetX, offsetY, 0.0f);
@@ -543,21 +558,15 @@ void Renderer::MirrorY()
 
 void Renderer::ERM()
 {
-	struct ScopedCorrect
+	glm::vec2 offset(0.5f, 0.5f);
+	settings_.modelOffset -= offset;
+
+	BOOST_SCOPE_EXIT(&settings_, &offset)
 	{
-		ScopedCorrect(Settings& settings) : settings(settings)
-		{
-			settings.modelOffset.x -= 0.5f;
-			settings.modelOffset.y -= 0.5f;
-		}
-		~ScopedCorrect()
-		{
-			settings.modelOffset.x += 0.5f;
-			settings.modelOffset.y += 0.5f;
-		}
-		Settings& settings;
-	} scope(settings_);
-	
+		settings_.modelOffset += offset;
+	}
+	BOOST_SCOPE_EXIT_END
+
 	Render();
 }
 
@@ -571,8 +580,8 @@ void Renderer::AnalyzeOverhangs()
 	{
 		std::cout << "Has overhangs at layer: " << GetCurrentSliceERM() << "\n";
 		std::stringstream s;
-		s << settings_.outputDir << std::setfill('0') << std::setw(5) << GetCurrentSliceERM() << "_overhangs.png";
-		SavePng(s.str());
+		s << std::setfill('0') << std::setw(5) << GetCurrentSliceERM() << "_overhangs.png";
+		SavePng((boost::filesystem::path(settings_.outputDir) / s.str()).string());
 	}
 	raster_.clear();
 

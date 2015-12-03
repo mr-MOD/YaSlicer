@@ -14,141 +14,11 @@
 #include <regex>
 #include <codecvt>
 
+#include <boost/filesystem.hpp>
+#include <boost/program_options.hpp>
+
 const auto SliceFileDigits = 5;
 const char * BasePlateFilename = "base_plate.png";
-
-std::string TrimLeft(const std::string& s)
-{
-	return std::string(std::find_if_not(s.begin(), s.end(), [](char c){ return c <= ' '; }), s.end());
-}
-
-std::string TrimRight(const std::string& s)
-{
-	auto rIt = std::find_if_not(s.rbegin(), s.rend(), [](char c){ return c <= ' '; });
-	return std::string(s.begin(), rIt.base());
-}
-
-std::string Trim(const std::string& s)
-{
-	return TrimLeft(TrimRight(s));
-}
-
-
-void ReadSetting(std::istream& s, const std::string& name, Settings& settings)
-{
-	if (name == "modelFile")
-	{
-		std::getline(s, settings.modelFile);
-		settings.modelFile = Trim(settings.modelFile);
-	}
-	else if (name == "machineMaskFile1")
-	{
-		std::getline(s, settings.machineMaskFile[0]);
-		settings.machineMaskFile[0] = Trim(settings.machineMaskFile[0]);
-	}
-	else if (name == "machineMaskFile2")
-	{
-		std::getline(s, settings.machineMaskFile[1]);
-		settings.machineMaskFile[1] = Trim(settings.machineMaskFile[1]);
-	}
-	else if (name == "outputDir")
-	{
-		std::getline(s, settings.outputDir);
-		settings.outputDir = Trim(settings.outputDir);
-		if (settings.outputDir.length() &&
-			*settings.outputDir.rbegin() != '/' &&
-			*settings.outputDir.rbegin() != '\\')
-		{
-			settings.outputDir += '/';
-		}
-	}
-	else if (name == "step")
-	{
-		s >> settings.step;
-	}
-	else if (name == "renderWidth")
-	{
-		s >> settings.renderWidth;
-	}
-	else if (name == "renderHeight")
-	{
-		s >> settings.renderHeight;
-	}
-	else if (name == "samples")
-	{
-		s >> settings.samples;
-	}
-	else if (name == "plateWidth")
-	{
-		s >> settings.plateWidth;
-	}
-	else if (name == "plateHeight")
-	{
-		s >> settings.plateHeight;
-	}
-	else if (name == "queue")
-	{
-		s >> settings.queue;
-	}
-	else if (name == "doAxialDilate")
-	{
-		s >> settings.doAxialDilate;
-	}
-	else if (name == "doOmniDirectionalDilate")
-	{
-		s >> settings.doOmniDirectionalDilate;
-	}
-	else if (name == "omniDilateSliceFactor")
-	{
-		s >> settings.omniDilateSliceFactor;
-	}
-	else if (name == "omniDilateScale")
-	{
-		s >> settings.omniDilateScale;
-	}
-	else if (name == "doBinarize")
-	{
-		s >> settings.doBinarize;
-	}
-	else if (name == "binarizeThreshold")
-	{
-		s >> settings.binarizeThreshold;
-	}
-	else if (name == "modelOffset")
-	{
-		s >> settings.modelOffset.x >> settings.modelOffset.y;
-	}
-	else if (name == "optimizeMesh")
-	{
-		s >> settings.optimizeMesh;
-	}
-	else if (name == "offscreen")
-	{
-		s >> settings.offscreen;
-	}
-	else if (name == "doOverhangAnalysis")
-	{
-		s >> settings.doOverhangAnalysis;
-	}
-	else if (name == "maxSupportedDistance")
-	{
-		s >> settings.maxSupportedDistance;
-	}
-	else if (name == "enableERM")
-	{
-		s >> settings.enableERM;
-	}
-}
-
-void ReadSettings(std::istream& s, Settings& settings)
-{
-	std::string name;
-	while (name != "cfg_end")
-	{
-		s >> name;
-		ReadSetting(s, name, settings);
-	}
-}
 
 std::string GetOutputFileName(const Settings& settings, uint32_t slice)
 {
@@ -173,7 +43,9 @@ std::string ReplaceAll(const std::string& str, const std::string& what, const st
 
 std::string ReadEnvisiontechTemplate(const char* fileName)
 {
-	std::fstream file(std::string("envisiontech/") + fileName, std::ios::in);
+	boost::filesystem::path templates("envisiontech");
+
+	std::fstream file((templates / fileName).string(), std::ios::in);
 	CHECK(file.good());
 
 	std::string result;
@@ -250,7 +122,7 @@ void WriteEnvisiontechConfig(const Settings& settings, const std::string& fileNa
 	std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> convert;
 	std::u16string out = convert.from_bytes(job);
 
-	std::fstream file(settings.outputDir + fileName, std::ios::out | std::ios::binary);
+	std::fstream file((boost::filesystem::path(settings.outputDir) / fileName).string(), std::ios::out | std::ios::binary);
 	CHECK(file.good());
 
 	const char16_t ByteOrderMark = 0xFEFF;
@@ -259,113 +131,45 @@ void WriteEnvisiontechConfig(const Settings& settings, const std::string& fileNa
 	CHECK(file.good());
 }
 
-void RenderCommand(std::istream& s, const std::string& command, Renderer& r, const Settings& settings)
+void RenderModel(Renderer& r, const Settings& settings)
 {
-	if (command == "NumLayers")
-	{
-		std::cout << r.GetLayersCount();
-	}
-	else if (command == "Black")
-	{
-		r.Black();
-	}
-	else if (command == "White")
-	{
-		r.White();
-	}
-	else if (command == "FirstSlice")
-	{
-		r.FirstSlice();
-	}
-	else if (command == "NextSlice")
-	{
-		r.NextSlice();
-	}
-	else if (command == "Mask")
-	{
-		uint32_t mask= 0;
-		s >> mask;
-		mask = std::min(1u, mask);
-		r.SetMask(mask);
-	}
-	else if (command == "Sleep")
-	{
-		uint32_t delay = 0;
-		s >> delay;
-		std::this_thread::sleep_for(std::chrono::milliseconds(delay));
-	}
-	else if (command == "MirrorX")
-	{
-		r.MirrorX();
-	}
-	else if (command == "MirrorY")
-	{
-		r.MirrorY();
-	}
-	else if (command == "SliceModel")
-	{
-		auto tStart = std::chrono::high_resolution_clock::now();
+	auto tStart = std::chrono::high_resolution_clock::now();
+	const auto outputDir = boost::filesystem::path(settings.outputDir);
 
-		auto filePath = settings.outputDir + BasePlateFilename;
-		std::vector<uint8_t> data(settings.renderWidth * settings.renderHeight);
-		const uint8_t WhiteColorPaletteIndex = 0xFF;
-		std::fill(data.begin(), data.end(), WhiteColorPaletteIndex);
-		WritePng(filePath, settings.renderWidth, settings.renderHeight, 8, data, CreateGrayscalePalette());
+	auto filePath = (outputDir / BasePlateFilename).string();
+	std::vector<uint8_t> data(settings.renderWidth * settings.renderHeight);
+	const uint8_t WhiteColorPaletteIndex = 0xFF;
+	std::fill(data.begin(), data.end(), WhiteColorPaletteIndex);
+	WritePng(filePath, settings.renderWidth, settings.renderHeight, 8, data, CreateGrayscalePalette());
 
-		uint32_t nSlice = 0;
-		r.FirstSlice();
-		do
+	uint32_t nSlice = 0;
+	r.FirstSlice();
+	do
+	{
+		auto filePath = (outputDir / (settings.enableERM ? GetERMFileName(settings, nSlice, true) : GetOutputFileName(settings, nSlice))).string();
+		r.SavePng(filePath);
+
+		if (settings.doOverhangAnalysis)
 		{
-			auto filePath = settings.outputDir + (settings.enableERM ? GetERMFileName(settings, nSlice, true) : GetOutputFileName(settings, nSlice));
+			r.AnalyzeOverhangs();
+		}
+
+		if (settings.enableERM)
+		{
+			r.ERM();
+			filePath = (outputDir / GetERMFileName(settings, nSlice, false)).string();
 			r.SavePng(filePath);
-
-			if (settings.doOverhangAnalysis)
-			{
-				r.AnalyzeOverhangs();
-			}
-
-			if (settings.enableERM)
-			{
-				r.ERM();
-				filePath = settings.outputDir + GetERMFileName(settings, nSlice, false);
-				r.SavePng(filePath);
-			}
-		
-			++nSlice;
-		} while (r.NextSlice());
-
-		WriteEnvisiontechConfig(settings, "job.cfg", nSlice);
-
-		auto tRender = std::chrono::high_resolution_clock::now();
-		auto renderTime = std::chrono::duration_cast<std::chrono::milliseconds>(tRender - tStart).count();
-		std::cout << "Render: " << renderTime <<
-			" ms, " << (nSlice * 1000.0) / renderTime << " FPS" << std::endl;
-	}
-}
-
-void RenderCommands(std::istream& in, Renderer& r, const Settings& settings)
-{
-	std::string command;
-	while (!in.eof())
-	{
-		in >> command;
-		command = Trim(command);
-		if (command.empty())
-		{
-			continue;
 		}
-		
-		if (command[0] != '#')
-		{
-			RenderCommand(in, command, r, settings);
-			std::cout << command << " is done" << std::endl;
-		}
-		else
-		{
-			std::getline(in, command);
-		}
-		command.clear();
-	}
+
+		++nSlice;
+	} while (r.NextSlice());
+
+	WriteEnvisiontechConfig(settings, "job.cfg", nSlice);
+
+	auto tRender = std::chrono::high_resolution_clock::now();
+	auto renderTime = std::chrono::duration_cast<std::chrono::milliseconds>(tRender - tStart).count();
+	std::cout << "Render: " << renderTime <<
+		" ms, " << (nSlice * 1000.0) / renderTime << " FPS" << std::endl;
 }
 
 int main(int argc, char** argv)
@@ -373,10 +177,86 @@ int main(int argc, char** argv)
 	try
 	{
 		Settings settings;
-		ReadSettings(std::cin, settings);
+		std::string configFile;
+
+		namespace po = boost::program_options;
+		// Declare a group of options that will be 
+		// allowed only on command line
+		po::options_description generic("generic options");
+		generic.add_options()
+			("help,h", "produce help message")
+			("config,c", po::value<std::string>(&configFile)->default_value("config.cfg"), "slicing configuration file")
+			;
+
+		// Declare a group of options that will be 
+		// allowed both on command line and in
+		// config file
+		po::options_description config("slicing configuration");
+		config.add_options()
+			("modelFile,m", po::value<std::string>(&settings.modelFile), "model to process")
+			("outputDir,o", po::value<std::string>(&settings.outputDir), "output directory")
+
+			("step", po::value<float>(&settings.step)->default_value(0.025f), "slicing step (mm)")
+
+			("renderWidth", po::value<uint32_t>(&settings.renderWidth)->default_value(1920), "image x resolution")
+			("renderHeight", po::value<uint32_t>(&settings.renderHeight)->default_value(1080), "image y resolution")
+			("samples", po::value<uint32_t>(&settings.samples)->default_value(8), "samples per pixel")
+
+			("plateWidth", po::value<float>(&settings.plateWidth)->default_value(96.0f), "platform width (mm)")
+			("plateHeight", po::value<float>(&settings.plateHeight)->default_value(54.0f), "platform height (mm)")
+
+			("doAxialDilate", po::value<bool>(&settings.doAxialDilate)->default_value(true), "add pixels left and bottom on all contours")
+
+			("doBinarize", po::value<bool>(&settings.doBinarize)->default_value(false), "binarize final image")
+			("binarizeThreshold", po::value<uint32_t>(&settings.binarizeThreshold)->default_value(128), "binarization threshold")
+
+			("doOmniDirectionalDilate", po::value<bool>(&settings.doOmniDirectionalDilate)->default_value(false), "extend all contours by 1 pixel")
+			("omniDilateSliceFactor", po::value<uint32_t>(&settings.omniDilateSliceFactor)->default_value(2), "do omni directional dilate every N slice")
+			("omniDilateScale", po::value<float>(&settings.omniDilateScale)->default_value(1.0f), "scale omni directional extended pixels color by some factor")
+
+			("modelOffsetX", po::value<float>(&settings.modelOffset.x)->default_value(0.0f), "model X offset in pixels")
+			("modelOffsetY", po::value<float>(&settings.modelOffset.y)->default_value(0.0f), "model Y offset in pixels")
+
+			("doOverhangAnalysis,a", po::value<bool>(&settings.doOverhangAnalysis)->default_value(false), "analyze unsupported model parts")
+			("maxSupportedDistance", po::value<float>(&settings.maxSupportedDistance)->default_value(0.2f), "maximum length of overhang upon previous layer")
+
+			("enableERM,e", po::value<bool>(&settings.enableERM)->default_value(false), "enable ERM mode")
+
+			("queue", po::value<uint32_t>(&settings.queue)->default_value(16), "PNG compression & write queue length (balance CPU-GPU load")
+
+			("mirrorX", po::value<bool>(&settings.mirrorX)->default_value(false), "mirror image horizontally")
+			("mirrorY", po::value<bool>(&settings.mirrorY)->default_value(false), "mirror image vertically")
+			;
+
+		po::options_description cmdline_options;
+		cmdline_options.add(generic).add(config);
+
+		po::options_description config_file_options;
+		config_file_options.add(config);
+
+		po::variables_map vm;
+		po::store(po::parse_command_line(argc, argv, cmdline_options), vm);
+		po::notify(vm);
+		po::store(po::parse_config_file<char>(configFile.c_str(), config_file_options), vm);
+		po::notify(vm);
+
+		if (vm.count("help") || argc < 2)
+		{
+			std::cout << "Yarilo slicer v0.8, 2015" << "\n";
+			std::cout << cmdline_options << "\n";
+			return 0;
+		}
+
+		if (settings.modelFile.empty())
+		{
+			std::cout << "No model to slice, exit" << "\n";
+			return 0;
+		}
+
+		boost::filesystem::create_directories(settings.outputDir);
 
 		Renderer r(settings);
-		RenderCommands(std::cin, r, settings);
+		RenderModel(r, settings);
 	}
 	catch (const std::exception& e)
 	{

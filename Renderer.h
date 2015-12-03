@@ -23,6 +23,7 @@ struct Settings
 		plateWidth(96.0f), plateHeight(54.0f),
 		doAxialDilate(true), doOmniDirectionalDilate(false), omniDilateSliceFactor(1), omniDilateScale(1.0f),
 		modelOffset(0), optimizeMesh(true), doBinarize(false), binarizeThreshold(0),
+		mirrorX(false), mirrorY(false),
 		doOverhangAnalysis(false), maxSupportedDistance(0.1f), enableERM(false) {}
 
 	bool offscreen;
@@ -59,6 +60,9 @@ struct Settings
 	float maxSupportedDistance;
 
 	bool enableERM;
+
+	bool mirrorX;
+	bool mirrorY;
 };
 
 class Renderer
