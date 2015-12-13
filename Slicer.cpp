@@ -218,7 +218,7 @@ int main(int argc, char** argv)
 			("modelOffsetY", po::value<float>(&settings.modelOffset.y)->default_value(0.0f), "model Y offset in pixels")
 
 			("doOverhangAnalysis,a", po::value<bool>(&settings.doOverhangAnalysis)->default_value(false), "analyze unsupported model parts")
-			("maxSupportedDistance", po::value<float>(&settings.maxSupportedDistance)->default_value(0.2f), "maximum length of overhang upon previous layer")
+			("maxSupportedDistance", po::value<float>(&settings.maxSupportedDistance)->default_value(0.2f), "maximum length of overhang upon previous layer (mm)")
 
 			("enableERM,e", po::value<bool>(&settings.enableERM)->default_value(false), "enable ERM mode")
 
