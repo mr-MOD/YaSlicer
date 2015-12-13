@@ -166,18 +166,25 @@ void WritePng(const std::string& fileName, uint32_t width, uint32_t height, uint
 			for (size_t i = 0; i < palette.size(); ++i)
 			{
 				pngPalette[i].red = palette[i] & 0xFF;
-				pngPalette[i].green = (palette[i] & 0xFF00) >> 8;
-				pngPalette[i].blue = (palette[i] & 0xFF0000) >> 16;
+				pngPalette[i].green = (palette[i] >> 8) & 0xFF;
+				pngPalette[i].blue = (palette[i] >> 16) & 0xFF;
 			}
 			png_set_PLTE(png_ptr, info_ptr, &pngPalette[0], static_cast<int>(pngPalette.size()));
 		}
-		
+
 		png_set_IHDR(png_ptr, info_ptr, width, height,
 			bitsPerChannel, color_type, PNG_INTERLACE_NONE,
 			PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+		png_set_filter(png_ptr, 0, PNG_NO_FILTERS);
+		png_set_sRGB_gAMA_and_cHRM(png_ptr, info_ptr, PNG_sRGB_INTENT_PERCEPTUAL);
+
+		const auto DefaultCompressionLevel = 1;
+		png_set_compression_level(png_ptr, DefaultCompressionLevel);
+		// set large buffer to write whole image in single IDAT
+		// to workaround Perfactory PNG reader bug.
+		png_set_compression_buffer_size(png_ptr, pixData.size()); 
 		
 		png_write_info(png_ptr, info_ptr);
-
 
 		/* write bytes */
 		if (setjmp(png_jmpbuf(png_ptr)))
