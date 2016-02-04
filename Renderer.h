@@ -19,12 +19,13 @@
 struct Settings
 {
 	Settings() : offscreen(true), step(0.025f), renderWidth(1920), renderHeight(1080), samples(0),
-		queue(std::max(1u, std::thread::hardware_concurrency())),
+		queue(std::max(1u, std::thread::hardware_concurrency())), whiteLayers(1),
 		plateWidth(96.0f), plateHeight(54.0f),
 		doAxialDilate(true), doOmniDirectionalDilate(false), omniDilateSliceFactor(1), omniDilateScale(1.0f),
 		modelOffset(0), optimizeMesh(true), doBinarize(false), binarizeThreshold(0),
 		mirrorX(false), mirrorY(false),
-		doOverhangAnalysis(false), maxSupportedDistance(0.1f), enableERM(false) {}
+		doOverhangAnalysis(false), maxSupportedDistance(0.1f), enableERM(false),
+		envisiontechTemplatesPath("envisiontech") {}
 
 	bool offscreen;
 	std::string modelFile;
@@ -39,6 +40,7 @@ struct Settings
 
 	uint32_t samples;
 	uint32_t queue;
+	uint32_t whiteLayers;
 
 	float plateWidth;
 	float plateHeight;
@@ -60,6 +62,7 @@ struct Settings
 	float maxSupportedDistance;
 
 	bool enableERM;
+	std::string envisiontechTemplatesPath;
 
 	bool mirrorX;
 	bool mirrorY;

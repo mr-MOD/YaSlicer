@@ -1,5 +1,7 @@
 #include "Renderer.h"
 #include "Png.h"
+#include "ERM.h"
+#include "Utils.h"
 #include "ErrorHandling.h"
 
 #include <memory>
@@ -11,124 +13,23 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
-#include <regex>
-#include <codecvt>
 
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 
-const auto SliceFileDigits = 5;
-const char * BasePlateFilename = "base_plate.png";
-
-std::string GetOutputFileName(const Settings& settings, uint32_t slice)
+void WriteWhiteLayers(const Settings& settings)
 {
-	std::stringstream s;
-	s << std::setfill('0') << std::setw(SliceFileDigits) << slice << ".png";
-	return s.str();
-}
+	const auto outputDir = boost::filesystem::path(settings.outputDir);
 
-std::string GetERMFileName(const Settings& settings, uint32_t slice, bool isPrimary)
-{
-	std::stringstream s;
-	s << "mask_" << std::setfill('0') << std::setw(SliceFileDigits)
-		<< (slice*2 + (isPrimary ? 0 : 1)) << (isPrimary ? "_s0" : "_s2") << ".png";
-	return s.str();
-}
-
-std::string ReplaceAll(const std::string& str, const std::string& what, const std::string& to)
-{
-	std::regex rx(what);
-	return std::regex_replace(str, rx, to);
-}
-
-std::string ReadEnvisiontechTemplate(const char* fileName)
-{
-	boost::filesystem::path templates("envisiontech");
-
-	std::fstream file((templates / fileName).string(), std::ios::in);
-	CHECK(file.good());
-
-	std::string result;
-	char buf[1024] = { 0 };
-	while (!file.eof() && !file.bad())
+	for (uint32_t i = 0; i < settings.whiteLayers; ++i)
 	{
-		auto bytesRead = file.read(buf, sizeof(buf)).gcount();
-		result.append(buf, buf + bytesRead);
-	}
-	CHECK(!file.bad());
-	return result;
-}
+		auto filePath = (outputDir / GetOutputFileName(settings, i)).string();
 
-std::string GenLayerConfig(const std::string& layerTemplate, const std::string& layerTemplateERM, const Settings& settings, uint32_t& layerNumber)
-{
-	const bool isBaseLayer = layerNumber == 0;
-	std::string layerFileName;
-	if (!isBaseLayer)
-	{
-		const auto slice = settings.enableERM ? ((layerNumber - 1) / 2) : (layerNumber - 1);
-		layerFileName = settings.enableERM ? GetERMFileName(settings, slice, true) : GetOutputFileName(settings, slice);
-	}
-	else
-	{
-		layerFileName = BasePlateFilename;
-	}
-
-	std::string result;
-	result = ReplaceAll(layerTemplate, "#FILENAME#", layerFileName);
-	result = ReplaceAll(result, "#LAYER_NUMBER#", std::to_string(layerNumber));
-	++layerNumber;
-
-	if (settings.enableERM && !isBaseLayer)
-	{
-		const auto slice = (layerNumber - 1) / 2;
-		layerFileName = GetERMFileName(settings, slice, false);
-		result += ReplaceAll(layerTemplateERM, "#FILENAME#", layerFileName);
-		result = ReplaceAll(result, "#LAYER_NUMBER#", std::to_string(layerNumber));
-		++layerNumber;
-	}
-
-	return result;
-}
-
-void WriteEnvisiontechConfig(const Settings& settings, const std::string& fileName, uint32_t numSlices)
-{
-	const auto jobTemplate = ReadEnvisiontechTemplate("job_template.txt");
-	const auto baseLayerTemplate = ReadEnvisiontechTemplate("base_layer_template.txt");
-	const auto firstLayerTemplate = ReadEnvisiontechTemplate("first_layer_template.txt");
-	const auto firstLayerErmTemplate = ReadEnvisiontechTemplate("first_layer_template_erm_part.txt");
-	const auto layerTemplate = ReadEnvisiontechTemplate("layer_template.txt");
-	const auto layerErmTemplate = ReadEnvisiontechTemplate("layer_template_erm_part.txt");
-
-	uint32_t layerNumber = 0;
-	auto baseLayer = GenLayerConfig(baseLayerTemplate, baseLayerTemplate, settings, layerNumber);
-	auto firstLayer(numSlices > 0 ? GenLayerConfig(firstLayerTemplate, firstLayerErmTemplate, settings, layerNumber) : std::string());
-
-	std::string layers;
-	for (uint32_t slice = 0; slice < (numSlices > 0 ? (numSlices-1) : 0); ++slice)
-	{
-		layers += GenLayerConfig(layerTemplate, layerErmTemplate, settings, layerNumber);
-	}
-
-	auto job = jobTemplate;
-	job = ReplaceAll(job, "#TOTAL_LAYERS#", std::to_string(numSlices * (settings.enableERM ? 2 : 1) + 1));
-	job = ReplaceAll(job, "#X_RES#", std::to_string(settings.renderWidth));
-	job = ReplaceAll(job, "#Y_RES#", std::to_string(settings.renderHeight));
-	job = ReplaceAll(job, "#PLATFORM_WIDTH_MICRONS#", std::to_string(static_cast<uint32_t>(settings.plateWidth*1000)));
-	job = ReplaceAll(job, "#PLATFORM_HEIGHT_MICRONS#", std::to_string(static_cast<uint32_t>(settings.plateHeight*1000)));
-	job = ReplaceAll(job, "#BASE_LAYER#", baseLayer);
-	job = ReplaceAll(job, "#FIRST_LAYER#", firstLayer);
-	job = ReplaceAll(job, "#LAYERS#", layers);
-
-	std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> convert;
-	std::u16string out = convert.from_bytes(job);
-
-	std::fstream file((boost::filesystem::path(settings.outputDir) / fileName).string(), std::ios::out | std::ios::binary);
-	CHECK(file.good());
-
-	const char16_t ByteOrderMark = 0xFEFF;
-	file.write(reinterpret_cast<const char*>(&ByteOrderMark), sizeof(ByteOrderMark));
-	file.write(reinterpret_cast<const char*>(out.c_str()), out.length() * sizeof(out[0]));
-	CHECK(file.good());
+		std::vector<uint8_t> data(settings.renderWidth * settings.renderHeight);
+		const uint8_t WhiteColorPaletteIndex = 0xFF;
+		std::fill(data.begin(), data.end(), WhiteColorPaletteIndex);
+		WritePng(filePath, settings.renderWidth, settings.renderHeight, 8, data, CreateGrayscalePalette());
+	}	
 }
 
 void RenderModel(Renderer& r, const Settings& settings)
@@ -136,17 +37,14 @@ void RenderModel(Renderer& r, const Settings& settings)
 	auto tStart = std::chrono::high_resolution_clock::now();
 	const auto outputDir = boost::filesystem::path(settings.outputDir);
 
-	auto filePath = (outputDir / BasePlateFilename).string();
-	std::vector<uint8_t> data(settings.renderWidth * settings.renderHeight);
-	const uint8_t WhiteColorPaletteIndex = 0xFF;
-	std::fill(data.begin(), data.end(), WhiteColorPaletteIndex);
-	WritePng(filePath, settings.renderWidth, settings.renderHeight, 8, data, CreateGrayscalePalette());
-
+	WriteWhiteLayers(settings);
+	
 	uint32_t nSlice = 0;
+	uint32_t imageNumber = settings.whiteLayers;
 	r.FirstSlice();
 	do
 	{
-		auto filePath = (outputDir / (settings.enableERM ? GetERMFileName(settings, nSlice, true) : GetOutputFileName(settings, nSlice))).string();
+		auto filePath = (outputDir / GetOutputFileName(settings, imageNumber++)).string();
 		r.SavePng(filePath);
 
 		if (settings.doOverhangAnalysis)
@@ -157,7 +55,7 @@ void RenderModel(Renderer& r, const Settings& settings)
 		if (settings.enableERM)
 		{
 			r.ERM();
-			filePath = (outputDir / GetERMFileName(settings, nSlice, false)).string();
+			filePath = (outputDir / GetOutputFileName(settings, imageNumber++)).string();
 			r.SavePng(filePath);
 		}
 
@@ -221,8 +119,10 @@ int main(int argc, char** argv)
 			("maxSupportedDistance", po::value<float>(&settings.maxSupportedDistance)->default_value(0.2f), "maximum length of overhang upon previous layer (mm)")
 
 			("enableERM,e", po::value<bool>(&settings.enableERM)->default_value(false), "enable ERM mode")
+			("envisiontechTemplatesPath", po::value<std::string>(&settings.envisiontechTemplatesPath)->default_value("envisiontech"), "envisiontech job templates path")
 
-			("queue", po::value<uint32_t>(&settings.queue)->default_value(16), "PNG compression & write queue length (balance CPU-GPU load")
+			("queue", po::value<uint32_t>(&settings.queue)->default_value(16), "PNG compression & write queue length (balance CPU-GPU load)")
+			("whiteLayers", po::value<uint32_t>(&settings.whiteLayers)->default_value(1), "white layers count")
 
 			("mirrorX", po::value<bool>(&settings.mirrorX)->default_value(false), "mirror image horizontally")
 			("mirrorY", po::value<bool>(&settings.mirrorY)->default_value(false), "mirror image vertically")
@@ -242,7 +142,7 @@ int main(int argc, char** argv)
 
 		if (vm.count("help") || argc < 2)
 		{
-			std::cout << "Yarilo slicer v0.8, 2015" << "\n";
+			std::cout << "Yarilo slicer v0.81, 2016" << "\n";
 			std::cout << cmdline_options << "\n";
 			return 0;
 		}
