@@ -6,10 +6,11 @@
  */
 
 #include "Renderer.h"
-#include "Png.h"
-#include "Loaders.h"
-#include "Raster.h"
 #include "Shaders.h"
+
+#include <PngFile.h>
+#include <Loaders.h>
+#include <Raster.h>
 
 #include <stdexcept>
 #include <numeric>

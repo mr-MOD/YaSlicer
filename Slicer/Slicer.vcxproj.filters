@@ -11,16 +11,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Geometry.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Renderer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Png.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Loaders.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CacheOpt.h">
@@ -36,12 +27,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="GlContextX.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Raster.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ErrorHandling.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Shaders.h">
@@ -61,18 +46,6 @@
     <ClCompile Include="Renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Geometry.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Png.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Loaders.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="CacheOpt.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="GlContextANGLE.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -83,9 +56,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="GlContext.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Raster.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ERM.cpp">

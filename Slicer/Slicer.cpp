@@ -1,8 +1,9 @@
 #include "Renderer.h"
-#include "Png.h"
 #include "ERM.h"
 #include "Utils.h"
-#include "ErrorHandling.h"
+
+#include <PngFile.h>
+#include <ErrorHandling.h>
 
 #include <memory>
 #include <iostream>

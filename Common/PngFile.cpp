@@ -1,4 +1,4 @@
-#include "Png.h"
+#include "PngFile.h"
 
 #include <png.h>
 #include <stdexcept>
