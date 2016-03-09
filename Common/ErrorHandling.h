@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdexcept>
-#include <cassert>
+#include <windows.h>
 
 #define STRINGIZE_IMPL(x) #x
 #define STRINGIZE(x) STRINGIZE_IMPL(x)
@@ -15,6 +15,6 @@
 
 #define CHECK(x) if (!(x)) { throw std::runtime_error("Check failed at "FILE_LINE); }
 
-#define EXPECT(x) if (!(x)) { ASSERT(x); throw std::runtime_error("Expect failed at "FILE_LINE); }
+#define EXPECT(x) if (!(x)) { ASSERT(x); throw std::logic_error("Expect failed at "FILE_LINE); }
 #define REQUIRE(x) ASSERT(x)
 #define INVARIANT(x) ASSERT(x)
