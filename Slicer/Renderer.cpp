@@ -397,11 +397,6 @@ uint32_t Renderer::GetCurrentSlice() const
 	return static_cast<uint32_t>(std::max((model_.pos - model_.min.z) / settings_.step + 0.5f - 1, 0.0f));
 }
 
-uint32_t Renderer::GetCurrentSliceERM() const
-{
-	return GetCurrentSlice() * (settings_.enableERM ? 2 : 1);
-}
-
 void Renderer::RenderAxialDilate()
 {
 	Render2DFilter(axialDilateProgram_);
@@ -571,7 +566,7 @@ void Renderer::ERM()
 	Render();
 }
 
-void Renderer::AnalyzeOverhangs()
+void Renderer::AnalyzeOverhangs(uint32_t imageNumber)
 {
 	glContext_->Resolve(imageFBO_);
 	glBindFramebuffer(GL_FRAMEBUFFER, differenceFBO_.GetHandle());
@@ -579,9 +574,9 @@ void Renderer::AnalyzeOverhangs()
 	raster_ = glContext_->GetRaster();
 	if (HasOverhangs(raster_, glContext_->GetSurfaceWidth(), glContext_->GetSurfaceHeight()))
 	{
-		std::cout << "Has overhangs at layer: " << GetCurrentSliceERM() << "\n";
+		std::cout << "Has overhangs at image: " << imageNumber << "\n";
 		std::stringstream s;
-		s << std::setfill('0') << std::setw(5) << GetCurrentSliceERM() << "_overhangs.png";
+		s << std::setfill('0') << std::setw(5) << imageNumber << "_overhangs.png";
 		SavePng((boost::filesystem::path(settings_.outputDir) / s.str()).string());
 	}
 	raster_.clear();

@@ -85,7 +85,7 @@ public:
 	void MirrorX();
 	void MirrorY();
 	void ERM();
-	void AnalyzeOverhangs();
+	void AnalyzeOverhangs(uint32_t imageNumber);
 
 private:
 	struct ModelData
@@ -134,7 +134,6 @@ private:
 	void Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix);
 
 	uint32_t GetCurrentSlice() const;
-	uint32_t GetCurrentSliceERM() const;
 
 	GLProgram mainProgram_;
 	GLuint mainVertexPosAttrib_;

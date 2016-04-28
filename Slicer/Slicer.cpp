@@ -50,7 +50,7 @@ void RenderModel(Renderer& r, const Settings& settings)
 
 		if (settings.doOverhangAnalysis)
 		{
-			r.AnalyzeOverhangs();
+			r.AnalyzeOverhangs(imageNumber-1);
 		}
 
 		if (settings.enableERM)
@@ -143,7 +143,7 @@ int main(int argc, char** argv)
 
 		if (vm.count("help") || argc < 2)
 		{
-			std::cout << "Yarilo slicer v0.81, 2016" << "\n";
+			std::cout << "Yarilo slicer v0.82, 2016" << "\n";
 			std::cout << cmdline_options << "\n";
 			return 0;
 		}
