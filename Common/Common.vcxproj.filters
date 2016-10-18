@@ -50,6 +50,9 @@
     <ClInclude Include="PngFile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="GLHelpers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

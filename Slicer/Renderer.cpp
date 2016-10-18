@@ -30,7 +30,7 @@
 namespace
 {
 	bool HasOverhangs(const std::vector<uint8_t>& raster, uint32_t width, uint32_t height);
-}
+} //namespace
 
 
 Renderer::Renderer(const Settings& settings) :
@@ -428,7 +428,7 @@ void Renderer::RenderBinarize(uint32_t threshold)
 		{
 			const auto thresholdUniform = glGetUniformLocation(program.GetHandle(), "threshold");
 			ASSERT(thresholdUniform != -1);
-			glUniform1f(thresholdUniform, std::max(1.0f, threshold / 255.0f));
+			glUniform1f(thresholdUniform, std::min(1.0f, threshold / 255.0f));
 		}
 	};
 	Render2DFilter(binarizeProgram_, binarizeUniforms);
@@ -627,4 +627,5 @@ namespace
 		return false;
 	}
 
-}
+	
+} //namespace

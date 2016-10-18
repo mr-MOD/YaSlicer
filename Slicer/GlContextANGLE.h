@@ -2,6 +2,8 @@
 
 #include "GlContext.h"
 
+#include <EGL/egl.h>
+
 class GlContextANGLE : public IGlContext
 {
 public:

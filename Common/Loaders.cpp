@@ -72,6 +72,10 @@ void LoadStl(const std::string& file, std::vector<float>& vb, std::vector<uint32
 
 	char header[80];
 	f.read(header, sizeof(header));
+	if (header[0] == 's' && header[1] == 'o' && header[2] == 'l' && header[3] == 'i' && header[4] == 'd')
+	{
+		throw std::runtime_error("No support for ASCII STL");
+	}
 
 	uint32_t numTriangles = 0;
 	f.read(reinterpret_cast<char*>(&numTriangles), sizeof(numTriangles));

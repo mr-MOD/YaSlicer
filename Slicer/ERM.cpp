@@ -91,8 +91,8 @@ void WriteEnvisiontechConfig(const Settings & settings, const std::string & file
 	job = ReplaceAll(job, "#FIRST_LAYER#", firstLayer);
 	job = ReplaceAll(job, "#LAYERS#", layers);
 
-	std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> convert;
-	std::u16string out = convert.from_bytes(job);
+	std::wstring_convert<std::codecvt_utf8_utf16<unsigned short>, unsigned short> convert;
+	std::basic_string<unsigned short> out = convert.from_bytes(job);
 
 	std::fstream file((boost::filesystem::path(settings.outputDir) / fileName).string(), std::ios::out | std::ios::binary);
 	CHECK(file.good());
