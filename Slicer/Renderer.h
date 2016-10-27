@@ -18,54 +18,50 @@
 
 struct Settings
 {
-	Settings() : offscreen(true), step(0.025f), renderWidth(1920), renderHeight(1080), samples(0),
-		queue(std::max(1u, std::thread::hardware_concurrency())), whiteLayers(1),
-		plateWidth(96.0f), plateHeight(54.0f),
-		doAxialDilate(true), doOmniDirectionalDilate(false), omniDilateSliceFactor(1), omniDilateScale(1.0f),
-		modelOffset(0), optimizeMesh(true), doBinarize(false), binarizeThreshold(0),
-		mirrorX(false), mirrorY(false),
-		doOverhangAnalysis(false), maxSupportedDistance(0.1f), enableERM(false),
-		envisiontechTemplatesPath("envisiontech") {}
-
-	bool offscreen;
+	bool offscreen = true;
 	std::string modelFile;
 	std::array<std::string, 2> machineMaskFile;
 
 	std::string outputDir;
 
-	float step;
+	float step = 0.025f;
 
-	uint32_t renderWidth;
-	uint32_t renderHeight;
+	uint32_t renderWidth = 1920;
+	uint32_t renderHeight = 1080;
 
-	uint32_t samples;
-	uint32_t queue;
-	uint32_t whiteLayers;
+	uint32_t samples = 0;
+	uint32_t queue = std::max(1u, std::thread::hardware_concurrency());
+	uint32_t whiteLayers = 1;
 
-	float plateWidth;
-	float plateHeight;
+	float plateWidth = 96.0f;
+	float plateHeight = 54.0f;
 
-	bool doAxialDilate;
-	bool doOmniDirectionalDilate;
+	bool doAxialDilate = false;
+	bool doOmniDirectionalDilate = false;
 
-	uint32_t omniDilateSliceFactor;
-	float omniDilateScale;
+	uint32_t omniDilateSliceFactor = 1;
+	float omniDilateScale = 1.0f;
 
-	bool doBinarize;
-	uint32_t binarizeThreshold;
+	bool doBinarize = false;
+	uint32_t binarizeThreshold = 128;
 
-	glm::vec2 modelOffset;
+	glm::vec2 modelOffset = glm::vec2(0, 0);
 
-	bool optimizeMesh;
+	bool optimizeMesh = true;
 
-	bool doOverhangAnalysis;
-	float maxSupportedDistance;
+	bool doOverhangAnalysis = false;
+	float maxSupportedDistance = 0.5f;
 
-	bool enableERM;
-	std::string envisiontechTemplatesPath;
+	bool enableERM = false;
+	std::string envisiontechTemplatesPath = "envisiontech";
+	
+	bool doSmallSpotsProcessing = false;
+	float smallSpotThreshold = 1.0f;
+	float smallSpotColorScaleFactor = 1.0f;
+	bool dilateOnlySmallSpots = false;
 
-	bool mirrorX;
-	bool mirrorY;
+	bool mirrorX = false;
+	bool mirrorY = false;
 };
 
 class Renderer

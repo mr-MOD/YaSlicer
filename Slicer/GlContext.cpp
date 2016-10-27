@@ -5,12 +5,11 @@ const std::string FullScreenVS = SHADER
 	precision mediump float;
 
 	attribute vec3 vPosition;
-	uniform vec2 texelSize;
 	varying vec2 texCoord;
 	void main()
 	{
 		gl_Position = vec4(vPosition, 1);
-		texCoord = (vPosition.xy + vec2(1, 1) + texelSize) * 0.5;
+		texCoord = (vPosition.xy + vec2(1, 1) ) * 0.5;
 	}
 );
 
@@ -30,10 +29,8 @@ const std::string FullScreenFS = SHADER
 RasterSetter::RasterSetter() :
 	texture_(GLTexture::Create()),
 	program_(CreateProgram(CreateVertexShader(FullScreenVS), CreateFragmentShader(FullScreenFS))),
-	texelSizeUniform_(0), textureUniform_(0), vertexPosAttrib_(0)
+	textureUniform_(0), vertexPosAttrib_(0)
 {
-	texelSizeUniform_ = glGetUniformLocation(program_.GetHandle(), "texelSize");
-	ASSERT(texelSizeUniform_ != -1);
 	textureUniform_ = glGetUniformLocation(program_.GetHandle(), "texture");
 	ASSERT(textureUniform_ != -1);
 	vertexPosAttrib_ = glGetAttribLocation(program_.GetHandle(), "vPosition");
@@ -80,8 +77,6 @@ void RasterSetter::SetRaster(const std::vector<uint8_t>& raster, uint32_t width,
 	glDisable(GL_STENCIL_TEST);
 	glStencilFunc(GL_ALWAYS, 0, 0);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-	glUniform2f(texelSizeUniform_, 1.0f / width, 1.0f / height);
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture_.GetHandle());

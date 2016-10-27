@@ -95,38 +95,43 @@ int main(int argc, char** argv)
 			("modelFile,m", po::value<std::string>(&settings.modelFile), "model to process")
 			("outputDir,o", po::value<std::string>(&settings.outputDir), "output directory")
 
-			("step", po::value<float>(&settings.step)->default_value(0.025f), "slicing step (mm)")
+			("step", po::value<float>(&settings.step)->default_value(settings.step), "slicing step (mm)")
 
-			("renderWidth", po::value<uint32_t>(&settings.renderWidth)->default_value(1920), "image x resolution")
-			("renderHeight", po::value<uint32_t>(&settings.renderHeight)->default_value(1080), "image y resolution")
-			("samples", po::value<uint32_t>(&settings.samples)->default_value(8), "samples per pixel")
+			("renderWidth", po::value<uint32_t>(&settings.renderWidth)->default_value(settings.renderWidth), "image x resolution")
+			("renderHeight", po::value<uint32_t>(&settings.renderHeight)->default_value(settings.renderHeight), "image y resolution")
+			("samples", po::value<uint32_t>(&settings.samples)->default_value(settings.samples), "samples per pixel")
 
-			("plateWidth", po::value<float>(&settings.plateWidth)->default_value(96.0f), "platform width (mm)")
-			("plateHeight", po::value<float>(&settings.plateHeight)->default_value(54.0f), "platform height (mm)")
+			("plateWidth", po::value<float>(&settings.plateWidth)->default_value(settings.plateWidth), "platform width (mm)")
+			("plateHeight", po::value<float>(&settings.plateHeight)->default_value(settings.plateHeight), "platform height (mm)")
 
-			("doAxialDilate", po::value<bool>(&settings.doAxialDilate)->default_value(true), "add pixels left and bottom on all contours")
+			("doAxialDilate", po::value<bool>(&settings.doAxialDilate)->default_value(settings.doAxialDilate), "add pixels left and bottom on all contours")
 
-			("doBinarize", po::value<bool>(&settings.doBinarize)->default_value(false), "binarize final image")
-			("binarizeThreshold", po::value<uint32_t>(&settings.binarizeThreshold)->default_value(128), "binarization threshold")
+			("doBinarize", po::value<bool>(&settings.doBinarize)->default_value(settings.doBinarize), "binarize final image")
+			("binarizeThreshold", po::value<uint32_t>(&settings.binarizeThreshold)->default_value(settings.binarizeThreshold), "binarization threshold")
 
-			("doOmniDirectionalDilate", po::value<bool>(&settings.doOmniDirectionalDilate)->default_value(false), "extend all contours by 1 pixel")
-			("omniDilateSliceFactor", po::value<uint32_t>(&settings.omniDilateSliceFactor)->default_value(2), "do omni directional dilate every N slice")
-			("omniDilateScale", po::value<float>(&settings.omniDilateScale)->default_value(1.0f), "scale omni directional extended pixels color by some factor")
+			("doOmniDirectionalDilate", po::value<bool>(&settings.doOmniDirectionalDilate)->default_value(settings.doOmniDirectionalDilate), "extend all contours by 1 pixel")
+			("omniDilateSliceFactor", po::value<uint32_t>(&settings.omniDilateSliceFactor)->default_value(settings.omniDilateSliceFactor), "do omni directional dilate every N slice")
+			("omniDilateScale", po::value<float>(&settings.omniDilateScale)->default_value(settings.omniDilateScale), "scale omni directional extended pixels color by some factor")
 
-			("modelOffsetX", po::value<float>(&settings.modelOffset.x)->default_value(0.0f), "model X offset in pixels")
-			("modelOffsetY", po::value<float>(&settings.modelOffset.y)->default_value(0.0f), "model Y offset in pixels")
+			("doSmallSpotsProcessing", po::value<bool>(&settings.doSmallSpotsProcessing)->default_value(settings.doSmallSpotsProcessing), "detect & process small spots")
+			("smallSpotThreshold", po::value<float>(&settings.smallSpotThreshold)->default_value(settings.smallSpotThreshold), "maximum small spot area (mm^2)")
+			//("dilateOnlySmallSpots", po::value<bool>(&settings.dilateOnlySmallSpots)->default_value(settings.dilateOnlySmallSpots), "dilate only small spots")
+			("smallSpotColorScaleFactor", po::value<float>(&settings.smallSpotColorScaleFactor)->default_value(settings.smallSpotColorScaleFactor), "scale small spot color by some factor")
 
-			("doOverhangAnalysis,a", po::value<bool>(&settings.doOverhangAnalysis)->default_value(false), "analyze unsupported model parts")
-			("maxSupportedDistance", po::value<float>(&settings.maxSupportedDistance)->default_value(0.2f), "maximum length of overhang upon previous layer (mm)")
+			("modelOffsetX", po::value<float>(&settings.modelOffset.x)->default_value(settings.modelOffset.x), "model X offset in pixels")
+			("modelOffsetY", po::value<float>(&settings.modelOffset.y)->default_value(settings.modelOffset.y), "model Y offset in pixels")
 
-			("enableERM,e", po::value<bool>(&settings.enableERM)->default_value(false), "enable ERM mode")
-			("envisiontechTemplatesPath", po::value<std::string>(&settings.envisiontechTemplatesPath)->default_value("envisiontech"), "envisiontech job templates path")
+			("doOverhangAnalysis,a", po::value<bool>(&settings.doOverhangAnalysis)->default_value(settings.doOverhangAnalysis), "analyze unsupported model parts")
+			("maxSupportedDistance", po::value<float>(&settings.maxSupportedDistance)->default_value(settings.maxSupportedDistance), "maximum length of overhang upon previous layer (mm)")
 
-			("queue", po::value<uint32_t>(&settings.queue)->default_value(16), "PNG compression & write queue length (balance CPU-GPU load)")
-			("whiteLayers", po::value<uint32_t>(&settings.whiteLayers)->default_value(1), "white layers count")
+			("enableERM,e", po::value<bool>(&settings.enableERM)->default_value(settings.enableERM), "enable ERM mode")
+			("envisiontechTemplatesPath", po::value<std::string>(&settings.envisiontechTemplatesPath)->default_value(settings.envisiontechTemplatesPath), "envisiontech job templates path")
 
-			("mirrorX", po::value<bool>(&settings.mirrorX)->default_value(false), "mirror image horizontally")
-			("mirrorY", po::value<bool>(&settings.mirrorY)->default_value(false), "mirror image vertically")
+			("queue", po::value<uint32_t>(&settings.queue)->default_value(settings.queue), "PNG compression & write queue length (balance CPU-GPU load)")
+			("whiteLayers", po::value<uint32_t>(&settings.whiteLayers)->default_value(settings.whiteLayers), "white layers count")
+
+			("mirrorX", po::value<bool>(&settings.mirrorX)->default_value(settings.mirrorX), "mirror image horizontally")
+			("mirrorY", po::value<bool>(&settings.mirrorY)->default_value(settings.mirrorY), "mirror image vertically")
 			;
 
 		po::options_description cmdline_options;
@@ -138,8 +143,6 @@ int main(int argc, char** argv)
 		po::variables_map vm;
 		po::store(po::parse_command_line(argc, argv, cmdline_options), vm);
 		po::notify(vm);
-		po::store(po::parse_config_file<char>(configFile.c_str(), config_file_options), vm);
-		po::notify(vm);
 
 		if (vm.count("help") || argc < 2)
 		{
@@ -147,6 +150,9 @@ int main(int argc, char** argv)
 			std::cout << cmdline_options << "\n";
 			return 0;
 		}
+
+		po::store(po::parse_config_file<char>(configFile.c_str(), config_file_options), vm);
+		po::notify(vm);
 
 		if (settings.modelFile.empty())
 		{

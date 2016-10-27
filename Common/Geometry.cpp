@@ -165,6 +165,44 @@ void ConvertToFloat16(const std::vector<float>& in, std::vector<glm::float16>& o
 	std::transform(in.begin(), in.end(), out.begin(), toFloat16);
 }
 
+std::vector<float> CalculateNormals(const std::vector<float>& vb, const std::vector<uint32_t>& ib)
+{
+	std::vector<float> normals(vb.size(), 0.0f);
+	for (size_t i = 0; i < ib.size(); i += 3)
+	{
+		auto iA = ib[i + 0];
+		auto iB = ib[i + 1];
+		auto iC = ib[i + 2];
+		glm::vec3 a(vb[iA * 3 + 0], vb[iA * 3 + 1], vb[iA * 3 + 2]);
+		glm::vec3 b(vb[iB * 3 + 0], vb[iB * 3 + 1], vb[iB * 3 + 2]);
+		glm::vec3 c(vb[iC * 3 + 0], vb[iC * 3 + 1], vb[iC * 3 + 2]);
+
+		auto normal = glm::cross(b - a, c - a);
+
+		normals[iA * 3 + 0] += normal.x;
+		normals[iA * 3 + 1] += normal.y;
+		normals[iA * 3 + 2] += normal.z;
+
+		normals[iB * 3 + 0] += normal.x;
+		normals[iB * 3 + 1] += normal.y;
+		normals[iB * 3 + 2] += normal.z;
+
+		normals[iC * 3 + 0] += normal.x;
+		normals[iC * 3 + 1] += normal.y;
+		normals[iC * 3 + 2] += normal.z;
+	}
+
+	for (size_t i = 0; i < normals.size(); i += 3)
+	{
+		glm::vec3 n(normals[i + 0], normals[i + 1], normals[i + 2]);
+		n = glm::normalize(n);
+		normals[i + 0] = n.x;
+		normals[i + 1] = n.y;
+		normals[i + 2] = n.z;
+	}
+	return normals;
+}
+
 void testRemoveVbHoles()
 {
 	/*std::vector<float> vb{ 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3 };

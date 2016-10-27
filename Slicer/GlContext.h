@@ -36,7 +36,6 @@ private:
 	GLTexture texture_;
 	GLProgram program_;
 
-	GLuint texelSizeUniform_;
 	GLuint textureUniform_;
 	GLuint vertexPosAttrib_;
 };

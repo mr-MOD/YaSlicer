@@ -11,6 +11,7 @@
 #include <PngFile.h>
 #include <Loaders.h>
 #include <Raster.h>
+#include <Geometry.h>
 
 #include <stdexcept>
 #include <numeric>
@@ -285,6 +286,43 @@ void Renderer::RenderCommon()
 		const auto KernelSize = 3;
 		glContext_->Resolve(imageFBO_);
 		RenderOmniDilate(settings_.omniDilateScale, KernelSize);
+	}
+
+	if (settings_.doSmallSpotsProcessing)
+	{
+		auto raster = glContext_->GetRaster();
+		std::vector<uint32_t> out(raster.size());
+		std::vector<Segment> segments;
+		
+		Segmentize(raster, out, segments, settings_.renderWidth, settings_.renderHeight);
+
+		const auto physWidth = settings_.plateWidth / settings_.renderWidth;
+		const auto physHeight = settings_.plateHeight / settings_.renderHeight;
+		const auto physPixelSquare = physWidth * physHeight;
+
+		for (const auto& v : segments)
+		{
+			if (v.count*physPixelSquare > settings_.smallSpotThreshold)
+			{
+				continue;
+			}
+
+			for (auto y = v.yBegin; y < v.yEnd; ++y)
+			{
+				for (auto x = v.xBegin; x < v.xEnd; ++x)
+				{
+					const size_t pixelIndex = y*settings_.renderWidth + x;
+					if (out[pixelIndex] == v.val && raster[pixelIndex] < 255)
+					{
+						const uint8_t scaledValue = static_cast<uint8_t>(
+							std::min(static_cast<uint32_t>(raster[pixelIndex] * settings_.smallSpotColorScaleFactor), 255u));
+						raster[pixelIndex] = scaledValue;
+					}
+				}
+			}
+		}
+
+		glContext_->SetRaster(raster, settings_.renderWidth, settings_.renderHeight);
 	}
 
 	if (settings_.doBinarize)

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdexcept>
+
+#define NOMINMAX
 #include <windows.h>
 
 #define STRINGIZE_IMPL(x) #x
