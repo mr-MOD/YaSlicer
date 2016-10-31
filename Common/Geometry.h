@@ -8,8 +8,8 @@
 #include <cstdint>
 
 
-void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
-	const std::function<void(const std::vector<float>& vb, const std::vector<uint32_t>& ib)>& onMesh);
+void SplitMesh(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
+	const std::function<void(const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib)>& onMesh);
 
 void ConvertToFloat16(const std::vector<float>& in, std::vector<glm::float16>& out);
 

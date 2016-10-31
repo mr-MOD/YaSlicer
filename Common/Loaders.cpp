@@ -12,7 +12,7 @@
 #include <cstring>
 #include <algorithm>
 
-const auto MaxVerticesPerBuffer = 32000; // Raspberry Pi max
+const auto MaxVerticesPerBuffer = 64000;
 
 struct Key
 {
@@ -190,38 +190,6 @@ void LoadObj(const std::string& file, std::vector<float>& vb, std::vector<uint32
 	}
 }
 
-void LoadMesh(const std::string& file,
-	const std::function<void(const std::vector<float>&, const std::vector<uint16_t>&, uint32_t, uint32_t, uint32_t)>& onMesh)
-{
-	std::fstream f(file, std::ios::in | std::ios::binary);
-	if (f.fail() || f.bad())
-	{
-		throw std::runtime_error(strerror(errno));
-	}
-
-	MeshHeader header;
-	if (!f.read(reinterpret_cast<char*>(&header), sizeof(header)) ||
-		header.meshSignature != MeshSignature || header.meshVersion > MeshVersion)
-	{
-		throw std::runtime_error("Invalid mesh file");
-	}
-
-	MeshChunkHeader chunkHeader;
-	std::vector<float> vb;
-	std::vector<uint16_t> ib;
-	auto chunk = 0;
-	while (f.read(reinterpret_cast<char*>(&chunkHeader), sizeof(chunkHeader)))
-	{
-		vb.resize(chunkHeader.vbSize);
-		ib.resize(chunkHeader.ibSize);
-
-		f.read(reinterpret_cast<char*>(vb.data()), vb.size()*sizeof(vb[0]));
-		f.read(reinterpret_cast<char*>(ib.data()), ib.size()*sizeof(ib[0]));
-
-		onMesh(vb, ib, chunkHeader.frontFacingCount, chunkHeader.orthoFacingCount, chunkHeader.backFacingCount);
-	}
-}
-
 FileType GetFileType(const std::string& file)
 {
 	std::string fileLowerCase;
@@ -240,16 +208,12 @@ FileType GetFileType(const std::string& file)
 	{
 		return FileType::Obj;
 	}
-	else if (extension == "mesh")
-	{
-		return FileType::Mesh;
-	}
 
 	return FileType::Unknown;
 }
 
-void LoadModel(const std::string& file, bool writeMesh, bool optimize, const std::function<void(
-	const std::vector<float>&, const std::vector<uint16_t>&, uint32_t, uint32_t, uint32_t)>& onMesh)
+void LoadModel(const std::string& file, const std::function<void(
+	const std::vector<float>&, const std::vector<float>&, const std::vector<uint16_t>&)>& onMesh)
 {
 	const auto fileType = GetFileType(file);
 
@@ -258,10 +222,6 @@ void LoadModel(const std::string& file, bool writeMesh, bool optimize, const std
 
 	switch (fileType)
 	{
-	case FileType::Mesh:
-		LoadMesh(file, onMesh);
-		return;
-		break;
 	case FileType::Stl:
 		LoadStl(file, vb, ib);
 		break;
@@ -272,73 +232,12 @@ void LoadModel(const std::string& file, bool writeMesh, bool optimize, const std
 		throw std::runtime_error("Unknown model file format");
 	}
 
-	size_t optimizedVerts = 0;
-	size_t totalTris = ib.size() / 3;
+	auto nb = CalculateNormals(vb, ib);
 
-	std::string outFileName = file + ".mesh";
-	std::fstream outFile(outFileName, std::ios::out | std::ios::binary);
-	MeshHeader meshHeader;
-	outFile.write(reinterpret_cast<const char*>(&meshHeader), sizeof(meshHeader));
-
-	const auto MaxVertCount = MaxVerticesPerBuffer;
-	SplitMesh(vb, ib, MaxVertCount, [optimize, &optimizedVerts, &outFile, &onMesh](const std::vector<float>& vb, const std::vector<uint32_t>& ib) {
-		optimizedVerts += vb.size() / 3;
-
-		std::vector<uint16_t> ib16;
-		ib16.assign(ib.begin(), ib.end());
-
-		typedef std::array<uint16_t, 3> Triangle;
-
-		auto triBegin = reinterpret_cast<Triangle*>(ib16.data());
-		auto triEnd = triBegin + ib16.size() / 3;
-
-		auto frontEndIt = std::partition(triBegin, triEnd, [&vb](const Triangle& tri) {
-			auto e1x = vb[tri[1] * 3 + 0] - vb[tri[0] * 3 + 0];
-			auto e1y = vb[tri[1] * 3 + 1] - vb[tri[0] * 3 + 1];
-			auto e2x = vb[tri[2] * 3 + 0] - vb[tri[0] * 3 + 0];
-			auto e2y = vb[tri[2] * 3 + 1] - vb[tri[0] * 3 + 1];
-			auto nz = e1x*e2y - e1y*e2x;
-
-			return nz < 0;
-		});
-		auto orthoEndIt = std::partition(frontEndIt, triEnd, [&vb](const Triangle& tri) {
-			auto e1x = vb[tri[1] * 3 + 0] - vb[tri[0] * 3 + 0];
-			auto e1y = vb[tri[1] * 3 + 1] - vb[tri[0] * 3 + 1];
-			auto e2x = vb[tri[2] * 3 + 0] - vb[tri[0] * 3 + 0];
-			auto e2y = vb[tri[2] * 3 + 1] - vb[tri[0] * 3 + 1];
-			auto nz = e1x*e2y - e1y*e2x;
-
-			return nz == 0;
-		});
-
-		auto frontFacing = static_cast<uint32_t>(std::distance(triBegin, frontEndIt) * 3);
-		auto orthoFacing = static_cast<uint32_t>(std::distance(frontEndIt, orthoEndIt) * 3);
-		auto backFacing = static_cast<uint32_t>(std::distance(orthoEndIt, triEnd) * 3);
-
-		if (optimize)
+	static_assert(MaxVerticesPerBuffer < std::numeric_limits<uint16_t>::max(), "Vertex index must fit uint16_t");
+	SplitMesh(vb, nb, ib, MaxVerticesPerBuffer,
+		[&onMesh](const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib)
 		{
-			auto VertexCacheSize = 32;
-			std::vector<uint16_t> ib16Copy(ib16.size());
-			Forsyth::OptimizeFaces(ib16.data(), frontFacing,
-				static_cast<uint32_t>(vb.size() / 3), ib16Copy.data(), VertexCacheSize);
-			Forsyth::OptimizeFaces(ib16.data() + frontFacing + orthoFacing, backFacing,
-				static_cast<uint32_t>(vb.size() / 3), ib16Copy.data() + frontFacing + orthoFacing, VertexCacheSize);
-
-			ib16.swap(ib16Copy);
-		}
-
-
-		onMesh(vb, ib16, frontFacing, orthoFacing, backFacing);
-
-		uint32_t vbSize = static_cast<uint32_t>(vb.size());
-		uint32_t ibSize = static_cast<uint32_t>(ib16.size());
-
-		outFile.write(reinterpret_cast<const char*>(&vbSize), sizeof(vbSize));
-		outFile.write(reinterpret_cast<const char*>(&ibSize), sizeof(ibSize));
-		outFile.write(reinterpret_cast<const char*>(&frontFacing), sizeof(frontFacing));
-		outFile.write(reinterpret_cast<const char*>(&orthoFacing), sizeof(orthoFacing));
-		outFile.write(reinterpret_cast<const char*>(&backFacing), sizeof(backFacing));
-		outFile.write(reinterpret_cast<const char*>(vb.data()), vb.size()*sizeof(vb[0]));
-		outFile.write(reinterpret_cast<const char*>(ib16.data()), ib16.size()*sizeof(ib16[0]));
-	});
+			onMesh(vb, nb, std::vector<uint16_t>(ib.begin(), ib.end()));
+		});
 }

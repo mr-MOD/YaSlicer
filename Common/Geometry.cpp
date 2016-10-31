@@ -1,4 +1,5 @@
 #include "Geometry.h"
+#include "ErrorHandling.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -7,8 +8,10 @@
 #include <algorithm>
 #include <numeric>
 
-void RemoveVbHoles(std::vector<float>& vb, std::vector<uint32_t>& ib)
+void RemoveVbHoles(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib)
 {
+	ASSERT(vb.size() == nb.size());
+
 	auto vtxCount = vb.size() / 3;
 	std::vector<uint8_t> useCount(vtxCount, 0);
 	for (auto idx : ib)
@@ -50,25 +53,35 @@ void RemoveVbHoles(std::vector<float>& vb, std::vector<uint32_t>& ib)
 	// special remove_if
 	typedef std::array<float, 3> Vertex;
 
-	auto result = reinterpret_cast<Vertex*>(vb.data());
+	auto vbResult = reinterpret_cast<Vertex*>(vb.data());
 	auto vbFirst = reinterpret_cast<Vertex*>(vb.data());
+	auto nbResult = reinterpret_cast<Vertex*>(nb.data());
+	auto nbFirst = reinterpret_cast<Vertex*>(nb.data());
+
 	auto ucFirst = useCount.begin();
 	auto ucLast = useCount.end();
 	while (ucFirst != ucLast) {
 		if (*ucFirst > 0) {
-			*result = *vbFirst;
-			++result;
+			*vbResult = *vbFirst;
+			*nbResult = *nbFirst;
+			++vbResult;
+			++nbResult;
 		}
 		++ucFirst;
 		++vbFirst;
+		++nbFirst;
 	}
-	auto eraseStart = vb.begin() + std::distance(reinterpret_cast<Vertex*>(vb.data()), result) * 3;
-	vb.erase(eraseStart, vb.end());
+	auto vbEraseStart = vb.begin() + std::distance(reinterpret_cast<Vertex*>(vb.data()), vbResult) * 3;
+	vb.erase(vbEraseStart, vb.end());
+	auto nbEraseStart = nb.begin() + std::distance(reinterpret_cast<Vertex*>(nb.data()), nbResult) * 3;
+	nb.erase(nbEraseStart, nb.end());
 }
 
-void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
-	const std::function<void(const std::vector<float>& vb, const std::vector<uint32_t>& ib)>& onMesh)
+void SplitMesh(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
+	const std::function<void(const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib)>& onMesh)
 {
+	ASSERT(vb.size() == nb.size());
+
 	typedef std::array<uint32_t, 3> Triangle;
 
 	// make last triangle index max of 3
@@ -89,6 +102,8 @@ void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, const uint32_t
 
 	std::vector<float> curVb;
 	curVb.reserve(maxVertsInBuffer * 3);
+	std::vector<float> curNb;
+	curNb.reserve(maxVertsInBuffer * 3);
 	std::vector<uint32_t> curIb;
 	curIb.reserve(maxVertsInBuffer * 3);
 
@@ -130,11 +145,13 @@ void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, const uint32_t
 				})->first;
 
 			curStepIdxEnd = it;
-			curVb.resize((maxIndex+1) * 3);
+			curVb.resize((maxIndex + 1) * 3);
+			curNb.resize((maxIndex + 1) * 3);
 		}
 		else
 		{
 			curVb.resize(maxVertsInBuffer * 3);
+			curNb.resize(maxVertsInBuffer * 3);
 		}
 		
 		curIb.assign(reinterpret_cast<uint32_t*>(startIt), reinterpret_cast<uint32_t*>(curStepIdxEnd));
@@ -143,14 +160,18 @@ void SplitMesh(std::vector<float>& vb, std::vector<uint32_t>& ib, const uint32_t
 			curVb[idx * 3 + 0] = vb[idx * 3 + 0];
 			curVb[idx * 3 + 1] = vb[idx * 3 + 1];
 			curVb[idx * 3 + 2] = vb[idx * 3 + 2];
+
+			curNb[idx * 3 + 0] = nb[idx * 3 + 0];
+			curNb[idx * 3 + 1] = nb[idx * 3 + 1];
+			curNb[idx * 3 + 2] = nb[idx * 3 + 2];
 		}
 
-		RemoveVbHoles(curVb, curIb);
-		onMesh(curVb, curIb);
+		RemoveVbHoles(curVb, curNb, curIb);
+		onMesh(curVb, curNb, curIb);
 
 		auto idxCount = std::distance(startIt, curStepIdxEnd) * 3;
 		ib.erase(ib.begin(), ib.begin() + idxCount);
-		RemoveVbHoles(vb, ib);
+		RemoveVbHoles(vb, nb, ib);
 	}
 }
 

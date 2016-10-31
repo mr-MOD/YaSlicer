@@ -36,7 +36,6 @@ namespace
 
 Renderer::Renderer(const Settings& settings) :
 settings_(settings), curMask_(0),
-cullFront_(GL_FRONT), cullBack_(GL_BACK),
 mirror_(1,1),
 
 mainVertexPosAttrib_(0),
@@ -109,7 +108,6 @@ palette_(CreateGrayscalePalette())
 	GL_CHECK();
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-	glEnable(GL_CULL_FACE);
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_ALWAYS);
 	glDepthMask(GL_TRUE);
@@ -120,13 +118,11 @@ palette_(CreateGrayscalePalette())
 	if (settings_.mirrorX)
 	{
 		mirror_.x *= -1;
-		std::swap(cullFront_, cullBack_);
 	}
 
 	if (settings_.mirrorY)
 	{
 		mirror_.y *= -1;
-		std::swap(cullFront_, cullBack_);
 	}
 }
 
@@ -143,22 +139,31 @@ void Renderer::CreateGeometryBuffers()
 	model_.min.x = model_.min.y = model_.min.z = std::numeric_limits<float>::max();
 	model_.max.x = model_.max.y = model_.max.z = std::numeric_limits<float>::lowest();
 
-	LoadModel(settings_.modelFile, true, false, [this](const std::vector<float>& vb, const std::vector<uint16_t>& ib, uint32_t front, uint32_t ortho, uint32_t back) {
-
-		TriangleData triData(front, ortho, back);
+	LoadModel(settings_.modelFile,
+		[this](const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint16_t>& ib) {
 
 		auto vertexBuffer = GLBuffer::Create();
 		auto indexBuffer = GLBuffer::Create();
 
+		auto vbCopy = vb;
+		if (settings_.doInflate)
+		{
+			for (size_t i = 0; i < vb.size(); i += 3)
+			{
+				vbCopy[i + 0] += std::copysignf(settings_.inflateDistance/2, nb[i + 0]);
+				vbCopy[i + 1] += std::copysignf(settings_.inflateDistance/2, nb[i + 1]);
+			}
+		}
+
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer.GetHandle());
-		glBufferData(GL_ARRAY_BUFFER, vb.size() * sizeof(vb[0]), vb.data(), GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, vbCopy.size() * sizeof(vbCopy[0]), vbCopy.data(), GL_STATIC_DRAW);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer.GetHandle());
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, ib.size() * sizeof(ib[0]), ib.data(), GL_STATIC_DRAW);
 
 		this->vBuffers_.push_back(std::move(vertexBuffer));
 		this->iBuffers_.push_back(std::move(indexBuffer));
-		this->iCount_.push_back(triData);
+		this->triCount_.push_back(static_cast<GLsizei>(ib.size()));
 
 		for (auto i = 0u; i < vb.size(); i += 3)
 		{
@@ -359,23 +364,9 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 	glUniformMatrix4fv(mainTransformUniform_, 1, GL_FALSE, glm::value_ptr(wvpMatrix));
 	glUniform2fv(mainMirrorUniform_, 1, glm::value_ptr(mirror_));
 
+	glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_INCR);
+	glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_DECR);
 	glStencilFunc(GL_ALWAYS, 0, 0xFF);
-	glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
-	glCullFace(cullFront_);
-	for (auto i = 0u; i < vBuffers_.size(); ++i)
-	{
-		glBindBuffer(GL_ARRAY_BUFFER, vBuffers_[i].GetHandle());
-		glVertexAttribPointer(mainVertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-		glEnableVertexAttribArray(mainVertexPosAttrib_);
-
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,iBuffers_[i].GetHandle());
-		glDrawElements(GL_TRIANGLES, iCount_[i].orthoFacing + iCount_[i].backFacing,
-			GL_UNSIGNED_SHORT, reinterpret_cast<void*>(iCount_[i].frontFacing * sizeof(uint16_t)));
-	}	
-
-	glStencilFunc(GL_ALWAYS, 0, 0xFF);
-	glStencilOp(GL_KEEP, GL_KEEP, GL_DECR);
-	glCullFace(cullBack_);
 	for (auto i = 0u; i < vBuffers_.size(); ++i)
 	{
 		glBindBuffer(GL_ARRAY_BUFFER, vBuffers_[i].GetHandle());
@@ -383,8 +374,9 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 		glEnableVertexAttribArray(mainVertexPosAttrib_);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, iBuffers_[i].GetHandle());
-		glDrawElements(GL_TRIANGLES, iCount_[i].frontFacing + iCount_[i].orthoFacing, GL_UNSIGNED_SHORT, nullptr);
-	}
+		glDrawElements(GL_TRIANGLES, triCount_[i], GL_UNSIGNED_SHORT, 0);
+	}	
+
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 	GL_CHECK();
@@ -412,7 +404,7 @@ void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix)
 	glEnable(GL_STENCIL_TEST);
 	glStencilMask(0xFF);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-	glStencilFunc(GL_LESS, 0x80, 0xFF);
+	glStencilFunc(settings_.mirrorX ^ settings_.mirrorY ? GL_GREATER : GL_LESS, 0x80, 0xFF);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 	glUniformMatrix4fv(maskWVTransformUniform_, 1, GL_FALSE, glm::value_ptr(wvMatrix));
@@ -577,7 +569,6 @@ void Renderer::SavePng(const std::string& fileName)
 void Renderer::MirrorX()
 {
 	mirror_.x *= -1;
-	std::swap(cullFront_, cullBack_);
 
 	Render();
 }
@@ -585,7 +576,6 @@ void Renderer::MirrorX()
 void Renderer::MirrorY()
 {
 	mirror_.y *= -1;
-	std::swap(cullFront_, cullBack_);
 
 	Render();
 }

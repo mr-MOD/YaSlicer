@@ -106,6 +106,9 @@ int main(int argc, char** argv)
 
 			("doAxialDilate", po::value<bool>(&settings.doAxialDilate)->default_value(settings.doAxialDilate), "add pixels left and bottom on all contours")
 
+			("doInflate", po::value<bool>(&settings.doInflate)->default_value(settings.doInflate), "inflate model")
+			("inflateDistance", po::value<float>(&settings.inflateDistance)->default_value(settings.inflateDistance), "inflate distance (mm)")
+
 			("doBinarize", po::value<bool>(&settings.doBinarize)->default_value(settings.doBinarize), "binarize final image")
 			("binarizeThreshold", po::value<uint32_t>(&settings.binarizeThreshold)->default_value(settings.binarizeThreshold), "binarization threshold")
 
@@ -146,7 +149,7 @@ int main(int argc, char** argv)
 
 		if (vm.count("help") || argc < 2)
 		{
-			std::cout << "Yarilo slicer v0.83, 2016" << "\n";
+			std::cout << "Yarilo slicer v0.84, 2016" << "\n";
 			std::cout << cmdline_options << "\n";
 			return 0;
 		}

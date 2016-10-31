@@ -39,6 +39,9 @@ struct Settings
 	bool doAxialDilate = false;
 	bool doOmniDirectionalDilate = false;
 
+	bool doInflate = false;
+	float inflateDistance = 0.1f;
+
 	uint32_t omniDilateSliceFactor = 1;
 	float omniDilateScale = 1.0f;
 
@@ -46,8 +49,6 @@ struct Settings
 	uint32_t binarizeThreshold = 128;
 
 	glm::vec2 modelOffset = glm::vec2(0, 0);
-
-	bool optimizeMesh = true;
 
 	bool doOverhangAnalysis = false;
 	float maxSupportedDistance = 0.5f;
@@ -93,21 +94,6 @@ private:
 		float pos;
 		glm::vec3 min;
 		glm::vec3 max;
-	};
-
-	struct TriangleData
-	{
-		TriangleData() :
-			frontFacing(0), orthoFacing(0), backFacing(0)
-		{
-		}
-		TriangleData(GLsizei frontFacing, GLsizei orthoFacing, GLsizei backFacing) :
-			frontFacing(frontFacing), orthoFacing(orthoFacing), backFacing(backFacing)
-		{
-		}
-		GLsizei frontFacing;
-		GLsizei orthoFacing;
-		GLsizei backFacing;
 	};
 
 	using UniformSetterType = std::function<void(const GLProgram&)>;
@@ -163,15 +149,12 @@ private:
 
 	std::vector<GLBuffer> vBuffers_;
 	std::vector<GLBuffer> iBuffers_;
-
-	std::vector<TriangleData> iCount_;
+	std::vector<GLsizei> triCount_;
 
 	ModelData model_;
 	Settings settings_;
 	uint32_t curMask_;
 
-	GLenum cullFront_;
-	GLenum cullBack_;
 	glm::vec2 mirror_;
 
 	const std::vector<uint32_t> palette_;
