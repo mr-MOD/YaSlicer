@@ -104,25 +104,12 @@ int main(int argc, char** argv)
 			("plateWidth", po::value<float>(&settings.plateWidth)->default_value(settings.plateWidth), "platform width (mm)")
 			("plateHeight", po::value<float>(&settings.plateHeight)->default_value(settings.plateHeight), "platform height (mm)")
 
-			("doAxialDilate", po::value<bool>(&settings.doAxialDilate)->default_value(settings.doAxialDilate), "add pixels left and bottom on all contours")
-
 			("doInflate", po::value<bool>(&settings.doInflate)->default_value(settings.doInflate), "inflate model")
 			("inflateDistance", po::value<float>(&settings.inflateDistance)->default_value(settings.inflateDistance), "inflate distance (mm)")
 
-			("doBinarize", po::value<bool>(&settings.doBinarize)->default_value(settings.doBinarize), "binarize final image")
-			("binarizeThreshold", po::value<uint32_t>(&settings.binarizeThreshold)->default_value(settings.binarizeThreshold), "binarization threshold")
-
-			("doOmniDirectionalDilate", po::value<bool>(&settings.doOmniDirectionalDilate)->default_value(settings.doOmniDirectionalDilate), "extend all contours by 1 pixel")
-			("omniDilateSliceFactor", po::value<uint32_t>(&settings.omniDilateSliceFactor)->default_value(settings.omniDilateSliceFactor), "do omni directional dilate every N slice")
-			("omniDilateScale", po::value<float>(&settings.omniDilateScale)->default_value(settings.omniDilateScale), "scale omni directional extended pixels color by some factor")
-
 			("doSmallSpotsProcessing", po::value<bool>(&settings.doSmallSpotsProcessing)->default_value(settings.doSmallSpotsProcessing), "detect & process small spots")
 			("smallSpotThreshold", po::value<float>(&settings.smallSpotThreshold)->default_value(settings.smallSpotThreshold), "maximum small spot area (mm^2)")
-			//("dilateOnlySmallSpots", po::value<bool>(&settings.dilateOnlySmallSpots)->default_value(settings.dilateOnlySmallSpots), "dilate only small spots")
-			("smallSpotColorScaleFactor", po::value<float>(&settings.smallSpotColorScaleFactor)->default_value(settings.smallSpotColorScaleFactor), "scale small spot color by some factor")
-
-			("modelOffsetX", po::value<float>(&settings.modelOffset.x)->default_value(settings.modelOffset.x), "model X offset in pixels")
-			("modelOffsetY", po::value<float>(&settings.modelOffset.y)->default_value(settings.modelOffset.y), "model Y offset in pixels")
+			("smallSpotInflateDistance", po::value<float>(&settings.smallSpotInflateDistance)->default_value(settings.smallSpotInflateDistance), "small spot inflate distance (mm)")
 
 			("doOverhangAnalysis,a", po::value<bool>(&settings.doOverhangAnalysis)->default_value(settings.doOverhangAnalysis), "analyze unsupported model parts")
 			("maxSupportedDistance", po::value<float>(&settings.maxSupportedDistance)->default_value(settings.maxSupportedDistance), "maximum length of overhang upon previous layer (mm)")
@@ -149,7 +136,7 @@ int main(int argc, char** argv)
 
 		if (vm.count("help") || argc < 2)
 		{
-			std::cout << "Yarilo slicer v0.84, 2016" << "\n";
+			std::cout << "Yarilo slicer v0.85, 2016" << "\n";
 			std::cout << cmdline_options << "\n";
 			return 0;
 		}

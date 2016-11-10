@@ -35,12 +35,15 @@ namespace
 
 
 Renderer::Renderer(const Settings& settings) :
-settings_(settings), curMask_(0),
+settings_(settings),
 mirror_(1,1),
+modelOffset_(0,0),
 
 mainVertexPosAttrib_(0),
+mainVertexNormalAttrib_(0),
 mainTransformUniform_(0),
 mainMirrorUniform_(0),
+mainInflateUniform_(0),
 
 maskVertexPosAttrib_(0),
 maskWVTransformUniform_(0),
@@ -64,8 +67,12 @@ palette_(CreateGrayscalePalette())
 	ASSERT(mainTransformUniform_ != -1);
 	mainMirrorUniform_ = glGetUniformLocation(mainProgram_.GetHandle(), "mirror");
 	ASSERT(mainMirrorUniform_ != -1);
+	mainInflateUniform_ = glGetUniformLocation(mainProgram_.GetHandle(), "inflate");
+	ASSERT(mainInflateUniform_ != -1);
 	mainVertexPosAttrib_ = glGetAttribLocation(mainProgram_.GetHandle(), "vPosition");
 	ASSERT(mainVertexPosAttrib_ != -1);
+	mainVertexNormalAttrib_ = glGetAttribLocation(mainProgram_.GetHandle(), "vNormal");
+	ASSERT(mainVertexNormalAttrib_ != -1);
 	GL_CHECK();
 
 	maskProgram_ = CreateProgram(CreateVertexShader(MaskVShader), CreateFragmentShader(MaskFShader));
@@ -81,30 +88,24 @@ palette_(CreateGrayscalePalette())
 	ASSERT(maskVertexPosAttrib_ != -1);
 	GL_CHECK();
 
-	axialDilateProgram_ = CreateProgram(CreateVertexShader(Filter2DVShader), CreateFragmentShader(AxialDilateFShader));
 	omniDilateProgram_ = CreateProgram(CreateVertexShader(Filter2DVShader), CreateFragmentShader(OmniDilateFShader));
-	binarizeProgram_ = CreateProgram(CreateVertexShader(Filter2DVShader), CreateFragmentShader(BinarizeFShader));
 	differenceProgram_ = CreateProgram(CreateVertexShader(Filter2DVShader), CreateFragmentShader(DifferenceFShader));
+	combineMaxProgram_ = CreateProgram(CreateVertexShader(Filter2DVShader), CreateFragmentShader(CombineMaxFShader));
 	
 	whiteTexture_ = GLTexture::Create();
+	maskTexture_ = GLTexture::Create();
 
 	glContext_->CreateTextureFBO(imageFBO_, imageTexture_);
 	glContext_->CreateTextureFBO(previousLayerImageFBO_, previousLayerImageTexture_);
 	White();
 	glContext_->Resolve(previousLayerImageFBO_);
-	glContext_->CreateTextureFBO(differenceFBO_, differenceTexture_);
+	glContext_->CreateTextureFBO(temporaryFBO_, temporaryTexture_);
 	GL_CHECK();
 
 	const uint32_t WhiteOpaquePixel = 0xFFFFFFFF;
 	glBindTexture(GL_TEXTURE_2D, whiteTexture_.GetHandle());
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, &WhiteOpaquePixel);
 
-	for (auto& tex : machineMaskTexture_)
-	{
-		tex = GLTexture::Create();
-		glBindTexture(GL_TEXTURE_2D, tex.GetHandle());
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, &WhiteOpaquePixel);
-	}
 	GL_CHECK();
 	glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -113,7 +114,6 @@ palette_(CreateGrayscalePalette())
 	glDepthMask(GL_TRUE);
 
 	CreateGeometryBuffers();
-	LoadMasks();
 
 	if (settings_.mirrorX)
 	{
@@ -143,25 +143,20 @@ void Renderer::CreateGeometryBuffers()
 		[this](const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint16_t>& ib) {
 
 		auto vertexBuffer = GLBuffer::Create();
+		auto normalBuffer = GLBuffer::Create();
 		auto indexBuffer = GLBuffer::Create();
 
-		auto vbCopy = vb;
-		if (settings_.doInflate)
-		{
-			for (size_t i = 0; i < vb.size(); i += 3)
-			{
-				vbCopy[i + 0] += std::copysignf(settings_.inflateDistance/2, nb[i + 0]);
-				vbCopy[i + 1] += std::copysignf(settings_.inflateDistance/2, nb[i + 1]);
-			}
-		}
-
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer.GetHandle());
-		glBufferData(GL_ARRAY_BUFFER, vbCopy.size() * sizeof(vbCopy[0]), vbCopy.data(), GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, vb.size() * sizeof(vb[0]), vb.data(), GL_STATIC_DRAW);
+
+		glBindBuffer(GL_ARRAY_BUFFER, normalBuffer.GetHandle());
+		glBufferData(GL_ARRAY_BUFFER, nb.size() * sizeof(nb[0]), nb.data(), GL_STATIC_DRAW);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer.GetHandle());
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, ib.size() * sizeof(ib[0]), ib.data(), GL_STATIC_DRAW);
 
 		this->vBuffers_.push_back(std::move(vertexBuffer));
+		this->nBuffers_.push_back(std::move(normalBuffer));
 		this->iBuffers_.push_back(std::move(indexBuffer));
 		this->triCount_.push_back(static_cast<GLsizei>(ib.size()));
 
@@ -235,12 +230,6 @@ void Renderer::White()
 	}
 }
 
-void Renderer::SetMask(uint32_t n)
-{
-	curMask_ = n;
-	Render();
-}
-
 void Renderer::Render()
 {
 	if (!settings_.offscreen)
@@ -259,8 +248,8 @@ void Renderer::RenderCommon()
 	auto middle = (model_.min + model_.max) * 0.5f;
 	auto extent = model_.max - model_.min;
 
-	auto offsetX = (settings_.plateWidth / settings_.renderWidth) * settings_.modelOffset.x;
-	auto offsetY = (settings_.plateHeight / settings_.renderHeight) * settings_.modelOffset.y;
+	auto offsetX = (settings_.plateWidth / settings_.renderWidth) * modelOffset_.x;
+	auto offsetY = (settings_.plateHeight / settings_.renderHeight) * modelOffset_.y;
 
 	auto model = glm::scale(glm::vec3(1.0f, 1.0f, 1.0f)) * glm::translate(offsetX, offsetY, 0.0f);
 
@@ -276,25 +265,12 @@ void Renderer::RenderCommon()
 
 	GL_CHECK();
 
-	Model(wvpMatrix);
-	Mask(wvpMatrix, wvMatrix);
-
-	if (settings_.doAxialDilate)
-	{
-		glContext_->Resolve(imageFBO_);
-		RenderAxialDilate();
-	}
-
-	auto currentSlice = GetCurrentSlice();
-	if (settings_.doOmniDirectionalDilate && currentSlice % settings_.omniDilateSliceFactor == 0)
-	{
-		const auto KernelSize = 3;
-		glContext_->Resolve(imageFBO_);
-		RenderOmniDilate(settings_.omniDilateScale, KernelSize);
-	}
+	Model(wvpMatrix, settings_.doInflate ? settings_.inflateDistance : 0.0f);
+	Mask(wvpMatrix, wvMatrix, whiteTexture_);
 
 	if (settings_.doSmallSpotsProcessing)
 	{
+		glContext_->Resolve(imageFBO_);
 		auto raster = glContext_->GetRaster();
 		std::vector<uint32_t> out(raster.size());
 		std::vector<Segment> segments;
@@ -307,33 +283,39 @@ void Renderer::RenderCommon()
 
 		for (const auto& v : segments)
 		{
-			if (v.count*physPixelSquare > settings_.smallSpotThreshold)
-			{
-				continue;
-			}
-
+			const uint8_t fillValue = v.count*physPixelSquare > settings_.smallSpotThreshold ? 0 : 255;
+			
 			for (auto y = v.yBegin; y < v.yEnd; ++y)
 			{
 				for (auto x = v.xBegin; x < v.xEnd; ++x)
 				{
 					const size_t pixelIndex = y*settings_.renderWidth + x;
-					if (out[pixelIndex] == v.val && raster[pixelIndex] < 255)
+					if (out[pixelIndex] == v.val)
 					{
-						const uint8_t scaledValue = static_cast<uint8_t>(
-							std::min(static_cast<uint32_t>(raster[pixelIndex] * settings_.smallSpotColorScaleFactor), 255u));
-						raster[pixelIndex] = scaledValue;
+						raster[pixelIndex] = fillValue;
 					}
 				}
 			}
 		}
 
-		glContext_->SetRaster(raster, settings_.renderWidth, settings_.renderHeight);
-	}
+		std::vector<uint8_t> rasterDilated(raster.size());
+		float expansionSize = 0.0f;
+		while (expansionSize <= settings_.smallSpotInflateDistance)
+		{
+			Dilate(raster, rasterDilated, settings_.renderWidth, settings_.renderHeight);
+			std::swap(raster, rasterDilated);
+			expansionSize += (physWidth + physHeight) / 2;
+		}
 
-	if (settings_.doBinarize)
-	{
-		glContext_->Resolve(imageFBO_);
-		RenderBinarize(settings_.binarizeThreshold);
+		glBindTexture(GL_TEXTURE_2D, maskTexture_.GetHandle());
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, settings_.renderWidth, settings_.renderHeight, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, raster.data());
+		glBindTexture(GL_TEXTURE_2D, 0);
+
+		Model(wvpMatrix, (settings_.doInflate ? settings_.inflateDistance : 0.0f)+ settings_.smallSpotInflateDistance);
+		Mask(wvpMatrix, wvMatrix, maskTexture_);
+		glContext_->Resolve(temporaryFBO_);
+
+		RenderCombineMax(temporaryTexture_);
 	}
 }
 
@@ -348,7 +330,7 @@ void Renderer::RenderFullscreen()
 	glContext_->SwapBuffers();
 }
 
-void Renderer::Model(const glm::mat4x4& wvpMatrix)
+void Renderer::Model(const glm::mat4x4& wvpMatrix, float inflateDistance)
 {
 	glViewport(0, 0, settings_.renderWidth, settings_.renderHeight);
 
@@ -363,6 +345,7 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 	glUseProgram(mainProgram_.GetHandle());
 	glUniformMatrix4fv(mainTransformUniform_, 1, GL_FALSE, glm::value_ptr(wvpMatrix));
 	glUniform2fv(mainMirrorUniform_, 1, glm::value_ptr(mirror_));
+	glUniform1f(mainInflateUniform_, inflateDistance);
 
 	glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_INCR);
 	glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_DECR);
@@ -373,6 +356,10 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 		glVertexAttribPointer(mainVertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 		glEnableVertexAttribArray(mainVertexPosAttrib_);
 
+		glBindBuffer(GL_ARRAY_BUFFER, nBuffers_[i].GetHandle());
+		glVertexAttribPointer(mainVertexNormalAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+		glEnableVertexAttribArray(mainVertexNormalAttrib_);
+
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, iBuffers_[i].GetHandle());
 		glDrawElements(GL_TRIANGLES, triCount_[i], GL_UNSIGNED_SHORT, 0);
 	}	
@@ -382,7 +369,7 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix)
 	GL_CHECK();
 }
 
-void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix)
+void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix, const GLTexture& mask)
 {
 	glCullFace(GL_BACK);
 
@@ -412,7 +399,7 @@ void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix)
 	glUniform2f(maskPlateSizeUniform_, settings_.plateWidth, settings_.plateHeight);
 
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, machineMaskTexture_[curMask_].GetHandle());
+	glBindTexture(GL_TEXTURE_2D, mask.GetHandle());
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -425,11 +412,6 @@ void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix)
 uint32_t Renderer::GetCurrentSlice() const
 {
 	return static_cast<uint32_t>(std::max((model_.pos - model_.min.z) / settings_.step + 0.5f - 1, 0.0f));
-}
-
-void Renderer::RenderAxialDilate()
-{
-	Render2DFilter(axialDilateProgram_);
 }
 
 void Renderer::RenderOmniDilate(float scale, uint32_t kernelSize)
@@ -450,20 +432,6 @@ void Renderer::RenderOmniDilate(float scale, uint32_t kernelSize)
 	Render2DFilter(omniDilateProgram_, omniUniforms);
 }
 
-void Renderer::RenderBinarize(uint32_t threshold)
-{
-	UniformSetters binarizeUniforms
-	{
-		[threshold](const GLProgram& program)
-		{
-			const auto thresholdUniform = glGetUniformLocation(program.GetHandle(), "threshold");
-			ASSERT(thresholdUniform != -1);
-			glUniform1f(thresholdUniform, std::min(1.0f, threshold / 255.0f));
-		}
-	};
-	Render2DFilter(binarizeProgram_, binarizeUniforms);
-}
-
 void Renderer::RenderDifference()
 {
 	UniformSetters differenceUniforms
@@ -481,6 +449,25 @@ void Renderer::RenderDifference()
 		}
 	};
 	Render2DFilter(differenceProgram_, differenceUniforms);
+}
+
+void Renderer::RenderCombineMax(const GLTexture& combineTexture)
+{
+	UniformSetters combineMaxUniforms
+	{
+		[this, &combineTexture](const GLProgram& program)
+		{
+			const auto combineTextureUniform = glGetUniformLocation(program.GetHandle(), "combineTexture");
+			ASSERT(combineTextureUniform != -1);
+			glUniform1i(combineTextureUniform, 1);
+
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, combineTexture.GetHandle());
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		}
+	};
+	Render2DFilter(combineMaxProgram_, combineMaxUniforms);
 }
 
 void Renderer::Render2DFilter(const GLProgram& program, const UniformSetters& additionalUniformSetters)
@@ -583,11 +570,11 @@ void Renderer::MirrorY()
 void Renderer::ERM()
 {
 	glm::vec2 offset(0.5f, 0.5f);
-	settings_.modelOffset -= offset;
+	modelOffset_ -= offset;
 
-	BOOST_SCOPE_EXIT(&settings_, &offset)
+	BOOST_SCOPE_EXIT(&offset, &modelOffset_)
 	{
-		settings_.modelOffset += offset;
+		modelOffset_ += offset;
 	}
 	BOOST_SCOPE_EXIT_END
 
@@ -597,7 +584,7 @@ void Renderer::ERM()
 void Renderer::AnalyzeOverhangs(uint32_t imageNumber)
 {
 	glContext_->Resolve(imageFBO_);
-	glBindFramebuffer(GL_FRAMEBUFFER, differenceFBO_.GetHandle());
+	glBindFramebuffer(GL_FRAMEBUFFER, temporaryFBO_.GetHandle());
 	RenderDifference();
 	raster_ = glContext_->GetRaster();
 	if (HasOverhangs(raster_, glContext_->GetSurfaceWidth(), glContext_->GetSurfaceHeight()))
@@ -613,30 +600,6 @@ void Renderer::AnalyzeOverhangs(uint32_t imageNumber)
 	const auto supportedPixels = static_cast<uint32_t>(ceil(settings_.maxSupportedDistance * settings_.renderWidth / settings_.plateWidth));
 	RenderOmniDilate(1.0f, supportedPixels * 2 + 1);
 	glContext_->ResetFBO();
-}
-
-void Renderer::LoadMasks()
-{
-	for (auto i = 0u; i < settings_.machineMaskFile.size(); ++i)
-	{
-		if (!settings_.machineMaskFile[i].empty())
-		{
-			uint32_t width = 0, height = 0, bitsPerPixel = 0;
-			auto pixelData = ReadPng(settings_.machineMaskFile[i], width, height, bitsPerPixel);
-
-			if (bitsPerPixel != 24)
-			{
-				throw std::runtime_error("Only support 8 bit per channel RGB (no alpha) PNG files for mask");
-			}
-
-			glBindTexture(GL_TEXTURE_2D, machineMaskTexture_[i].GetHandle());
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, &pixelData[0]);
-
-			GL_CHECK();
-		}
-	}
-
-	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 namespace

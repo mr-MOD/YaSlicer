@@ -7,11 +7,13 @@ const std::string VShader = SHADER
 	precision mediump float;
 
 	attribute vec3 vPosition;
+	attribute vec3 vNormal;
 	uniform mat4 wvp;
 	uniform vec2 mirror;
+	uniform float inflate;
 	void main()
 	{
-		gl_Position = wvp * vec4(vPosition, 1);
+		gl_Position = wvp * vec4(vPosition + vec3(inflate, inflate, 0) * sign(vNormal), 1);
 		gl_Position.xy = gl_Position.xy * mirror;
 	}
 );
@@ -73,24 +75,6 @@ const std::string Filter2DVShader = SHADER
 	}
 );
 
-const std::string AxialDilateFShader = SHADER
-(
-	precision mediump float;
-
-	varying vec2 texCoord;
-	uniform vec2 texelSize;
-	uniform sampler2D texture;
-
-	void main()
-	{
-		vec4 color0 = texture2D(texture, texCoord);
-		vec4 color1 = texture2D(texture, texCoord - texelSize*vec2(1, 0));
-		vec4 color2 = texture2D(texture, texCoord - texelSize*vec2(0, 1));
-		vec4 color3 = texture2D(texture, texCoord - texelSize*vec2(1, 1));
-		gl_FragColor = max(max(color0, color1),max(color2, color3));
-	}
-);
-
 const std::string OmniDilateFShader = SHADER
 (
 	precision mediump float;
@@ -117,35 +101,32 @@ const std::string OmniDilateFShader = SHADER
 	}
 );
 
-const std::string BinarizeFShader = SHADER
-(
-	precision mediump float;
-
-	varying vec2 texCoord;
-	uniform float threshold;
-	uniform vec2 texelSize;
-	uniform sampler2D texture;
-
-	void main()
-	{
-		vec4 color = texture2D(texture, texCoord);
-		gl_FragColor = color.r > threshold ? vec4(0) : vec4(1);
-	}
-);
-
 const std::string DifferenceFShader = SHADER
 (
 	precision mediump float;
 
 	varying vec2 texCoord;
-	uniform float threshold;
-	uniform vec2 texelSize;
 	uniform sampler2D texture;
 	uniform sampler2D previousLayerTexture;
 
 	void main()
 	{
 		vec4 color = texture2D(texture, texCoord) - texture2D(previousLayerTexture, texCoord);
+		gl_FragColor = color;
+	}
+);
+
+const std::string CombineMaxFShader = SHADER
+(
+	precision mediump float;
+
+	varying vec2 texCoord;
+	uniform sampler2D texture;
+	uniform sampler2D combineTexture;
+
+	void main()
+	{
+		vec4 color = max(texture2D(texture, texCoord), texture2D(combineTexture, texCoord));
 		gl_FragColor = color;
 	}
 );

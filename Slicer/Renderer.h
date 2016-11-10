@@ -20,7 +20,6 @@ struct Settings
 {
 	bool offscreen = true;
 	std::string modelFile;
-	std::array<std::string, 2> machineMaskFile;
 
 	std::string outputDir;
 
@@ -36,19 +35,8 @@ struct Settings
 	float plateWidth = 96.0f;
 	float plateHeight = 54.0f;
 
-	bool doAxialDilate = false;
-	bool doOmniDirectionalDilate = false;
-
 	bool doInflate = false;
 	float inflateDistance = 0.1f;
-
-	uint32_t omniDilateSliceFactor = 1;
-	float omniDilateScale = 1.0f;
-
-	bool doBinarize = false;
-	uint32_t binarizeThreshold = 128;
-
-	glm::vec2 modelOffset = glm::vec2(0, 0);
 
 	bool doOverhangAnalysis = false;
 	float maxSupportedDistance = 0.5f;
@@ -58,8 +46,7 @@ struct Settings
 	
 	bool doSmallSpotsProcessing = false;
 	float smallSpotThreshold = 1.0f;
-	float smallSpotColorScaleFactor = 1.0f;
-	bool dilateOnlySmallSpots = false;
+	float smallSpotInflateDistance = 0.1f;
 
 	bool mirrorX = false;
 	bool mirrorY = false;
@@ -78,7 +65,6 @@ public:
 	bool NextSlice();
 	void Black();
 	void White();
-	void SetMask(uint32_t n);
 	void MirrorX();
 	void MirrorY();
 	void ERM();
@@ -100,27 +86,27 @@ private:
 	using UniformSetters = std::vector<UniformSetterType>;
 
 	void CreateGeometryBuffers();
-	void LoadMasks();
 
 	void Render();
 	void RenderCommon();
-	void RenderAxialDilate();
 	void RenderOmniDilate(float scale, uint32_t kernelSize);
-	void RenderBinarize(uint32_t threshold);
 	void RenderDifference();
+	void RenderCombineMax(const GLTexture& additionalTexture);
 	void Render2DFilter(const GLProgram& program, const UniformSetters& additionalUniformSetters = UniformSetters());
 	void RenderOffscreen();
 	void RenderFullscreen();
 
-	void Model(const glm::mat4x4& wvpMatrix);
-	void Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix);
+	void Model(const glm::mat4x4& wvpMatrix, float inflateDistance);
+	void Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix, const GLTexture& mask);
 
 	uint32_t GetCurrentSlice() const;
 
 	GLProgram mainProgram_;
 	GLuint mainVertexPosAttrib_;
+	GLuint mainVertexNormalAttrib_;
 	GLuint mainTransformUniform_;
 	GLuint mainMirrorUniform_;
+	GLuint mainInflateUniform_;
 
 	GLProgram maskProgram_;
 	GLuint maskVertexPosAttrib_;
@@ -129,13 +115,11 @@ private:
 	GLuint maskTextureUniform_;
 	GLuint maskPlateSizeUniform_;
 
-	GLProgram axialDilateProgram_;
 	GLProgram omniDilateProgram_;
-	GLProgram binarizeProgram_;
 	GLProgram differenceProgram_;
+	GLProgram combineMaxProgram_;
 
-	GLTexture machineMaskTexture_[2];
-
+	GLTexture maskTexture_;
 	GLTexture whiteTexture_;
 
 	GLFramebuffer imageFBO_;
@@ -144,18 +128,19 @@ private:
 	GLFramebuffer previousLayerImageFBO_;
 	GLTexture previousLayerImageTexture_;
 
-	GLFramebuffer differenceFBO_;
-	GLTexture differenceTexture_;
+	GLFramebuffer temporaryFBO_;
+	GLTexture temporaryTexture_;
 
 	std::vector<GLBuffer> vBuffers_;
+	std::vector<GLBuffer> nBuffers_;
 	std::vector<GLBuffer> iBuffers_;
 	std::vector<GLsizei> triCount_;
 
 	ModelData model_;
 	Settings settings_;
-	uint32_t curMask_;
 
 	glm::vec2 mirror_;
+	glm::vec2 modelOffset_;
 
 	const std::vector<uint32_t> palette_;
 	std::vector<std::future<void>> pngSaveResult_;
