@@ -63,10 +63,7 @@ public:
 	uint32_t GetLayersCount() const;
 	void FirstSlice();
 	bool NextSlice();
-	void Black();
 	void White();
-	void MirrorX();
-	void MirrorY();
 	void ERM();
 	void AnalyzeOverhangs(uint32_t imageNumber);
 

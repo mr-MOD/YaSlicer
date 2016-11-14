@@ -202,20 +202,6 @@ bool Renderer::NextSlice()
 	return true;
 }
 
-void Renderer::Black()
-{
-	glViewport(0, 0, settings_.renderWidth, settings_.renderHeight);
-
-	glClearColor(0.0, 0.0, 0.0, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-	glFlush();
-
-	if (!settings_.offscreen)
-	{
-		glContext_->SwapBuffers();
-	}
-}
-
 void Renderer::White()
 {
 	glViewport(0, 0, settings_.renderWidth, settings_.renderHeight);
@@ -272,32 +258,33 @@ void Renderer::RenderCommon()
 	{
 		glContext_->Resolve(imageFBO_);
 		auto raster = glContext_->GetRaster();
-		std::vector<uint32_t> out(raster.size());
+		std::vector<uint32_t> segmentedRaster(raster.size());
 		std::vector<Segment> segments;
 		
-		Segmentize(raster, out, segments, settings_.renderWidth, settings_.renderHeight);
+		Segmentize(raster, segmentedRaster, segments, settings_.renderWidth, settings_.renderHeight, 255);
 
 		const auto physWidth = settings_.plateWidth / settings_.renderWidth;
 		const auto physHeight = settings_.plateHeight / settings_.renderHeight;
-		const auto physPixelSquare = physWidth * physHeight;
+		const auto physPixelArea = physWidth * physHeight;
 
-		for (const auto& v : segments)
+		for (const auto& segment : segments)
 		{
-			const uint8_t fillValue = v.count*physPixelSquare > settings_.smallSpotThreshold ? 0 : 255;
+			const uint8_t fillValue =
+				CalculateSegmentArea(segment, physPixelArea, raster,
+					segmentedRaster, settings_.renderWidth, settings_.renderHeight) > settings_.smallSpotThreshold ? 0 : 255;
 			
-			for (auto y = v.yBegin; y < v.yEnd; ++y)
-			{
-				for (auto x = v.xBegin; x < v.xEnd; ++x)
-				{
+			ForEachPixel(ExpandRange(segment.xBegin, segment.xEnd, 0, settings_.renderWidth),
+				ExpandRange(segment.yBegin, segment.yEnd, 0, settings_.renderHeight), [&](auto x, auto y) {
 					const size_t pixelIndex = y*settings_.renderWidth + x;
-					if (out[pixelIndex] == v.val)
+					if (raster[pixelIndex] > 0 &&
+						AnyOfPixels(ExpandRange(x, x + 1, 0, settings_.renderWidth), ExpandRange(y, y + 1, 0, settings_.renderHeight),
+							[&](auto x, auto y) { return segmentedRaster[y*settings_.renderWidth + x] == segment.val; }))
 					{
 						raster[pixelIndex] = fillValue;
 					}
-				}
-			}
+			});
 		}
-
+		
 		std::vector<uint8_t> rasterDilated(raster.size());
 		float expansionSize = 0.0f;
 		while (expansionSize <= settings_.smallSpotInflateDistance)
@@ -551,20 +538,6 @@ void Renderer::SavePng(const std::string& fileName)
 	{
 		pngSaveResult_.emplace_back(std::move(future));
 	}
-}
-
-void Renderer::MirrorX()
-{
-	mirror_.x *= -1;
-
-	Render();
-}
-
-void Renderer::MirrorY()
-{
-	mirror_.y *= -1;
-
-	Render();
 }
 
 void Renderer::ERM()
