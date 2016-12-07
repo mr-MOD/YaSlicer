@@ -31,6 +31,7 @@ struct Settings
 	uint32_t samples = 0;
 	uint32_t queue = std::max(1u, std::thread::hardware_concurrency());
 	uint32_t whiteLayers = 1;
+	float basementBorder = 5.0f;
 
 	float plateWidth = 96.0f;
 	float plateHeight = 54.0f;
@@ -66,6 +67,7 @@ public:
 	void White();
 	void ERM();
 	void AnalyzeOverhangs(uint32_t imageNumber);
+	std::pair<glm::vec2, glm::vec2> GetModelProjectionRect() const;
 
 private:
 	struct ModelData
@@ -85,6 +87,9 @@ private:
 	void CreateGeometryBuffers();
 
 	void Render();
+	glm::mat4x4 CalculateModelTransform() const;
+	glm::mat4x4 CalculateViewTransform() const;
+	glm::mat4x4 CalculateProjectionTransform() const;
 	void RenderCommon();
 	void RenderOmniDilate(float scale, uint32_t kernelSize);
 	void RenderDifference();

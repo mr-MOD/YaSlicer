@@ -3,6 +3,7 @@
 #include "Utils.h"
 
 #include <PngFile.h>
+#include <Raster.h>
 #include <ErrorHandling.h>
 
 #include <memory>
@@ -18,17 +19,27 @@
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 
-void WriteWhiteLayers(const Settings& settings)
+void WriteWhiteLayers(const Settings& settings, const std::pair<glm::vec2, glm::vec2>& bounds)
 {
 	const auto outputDir = boost::filesystem::path(settings.outputDir);
 
+	const auto xBorder = settings.basementBorder * settings.renderWidth / settings.plateWidth;
+	const auto yBorder = settings.basementBorder * settings.renderHeight / settings.plateHeight;
+
+	const int xStart = std::max(0, static_cast<int>(bounds.first.x - xBorder));
+	const int yStart = std::max(0, static_cast<int>(bounds.first.y - yBorder));
+	const int xEnd = std::min(static_cast<int>(settings.renderWidth), static_cast<int>(bounds.second.x + xBorder));
+	const int yEnd = std::min(static_cast<int>(settings.renderHeight), static_cast<int>(bounds.second.y + yBorder));
+
+	std::vector<uint8_t> data(settings.renderWidth * settings.renderHeight, 0);
+	ForEachPixel(std::make_pair(xStart, xEnd), std::make_pair(yStart, yEnd), [&data, &settings](auto x, auto y) {
+		const uint8_t WhiteColorPaletteIndex = 0xFF;
+		data[y * settings.renderWidth + x] = WhiteColorPaletteIndex;
+	});
+
 	for (uint32_t i = 0; i < settings.whiteLayers; ++i)
 	{
-		auto filePath = (outputDir / GetOutputFileName(settings, i)).string();
-
-		std::vector<uint8_t> data(settings.renderWidth * settings.renderHeight);
-		const uint8_t WhiteColorPaletteIndex = 0xFF;
-		std::fill(data.begin(), data.end(), WhiteColorPaletteIndex);
+		const auto filePath = (outputDir / GetOutputFileName(settings, i)).string();
 		WritePng(filePath, settings.renderWidth, settings.renderHeight, 8, data, CreateGrayscalePalette());
 	}	
 }
@@ -38,7 +49,7 @@ void RenderModel(Renderer& r, const Settings& settings)
 	auto tStart = std::chrono::high_resolution_clock::now();
 	const auto outputDir = boost::filesystem::path(settings.outputDir);
 
-	WriteWhiteLayers(settings);
+	WriteWhiteLayers(settings, r.GetModelProjectionRect());
 	
 	uint32_t nSlice = 0;
 	uint32_t imageNumber = settings.whiteLayers;
@@ -119,6 +130,7 @@ int main(int argc, char** argv)
 
 			("queue", po::value<uint32_t>(&settings.queue)->default_value(settings.queue), "PNG compression & write queue length (balance CPU-GPU load)")
 			("whiteLayers", po::value<uint32_t>(&settings.whiteLayers)->default_value(settings.whiteLayers), "white layers count")
+			("basementBorder", po::value<float>(&settings.basementBorder)->default_value(settings.basementBorder), "basement border size (mm)")
 
 			("mirrorX", po::value<bool>(&settings.mirrorX)->default_value(settings.mirrorX), "mirror image horizontally")
 			("mirrorY", po::value<bool>(&settings.mirrorY)->default_value(settings.mirrorY), "mirror image vertically")
@@ -136,7 +148,7 @@ int main(int argc, char** argv)
 
 		if (vm.count("help") || argc < 2)
 		{
-			std::cout << "Yarilo slicer v0.86, 2016" << "\n";
+			std::cout << "Yarilo slicer v0.87, 2016" << "\n";
 			std::cout << cmdline_options << "\n";
 			return 0;
 		}

@@ -228,26 +228,41 @@ void Renderer::Render()
 	}
 }
 
-void Renderer::RenderCommon()
+glm::mat4x4 Renderer::CalculateModelTransform() const
 {
-	float aspect = settings_.renderWidth / (float)settings_.renderHeight;
-	auto middle = (model_.min + model_.max) * 0.5f;
-	auto extent = model_.max - model_.min;
-
 	auto offsetX = (settings_.plateWidth / settings_.renderWidth) * modelOffset_.x;
 	auto offsetY = (settings_.plateHeight / settings_.renderHeight) * modelOffset_.y;
 
-	auto model = glm::scale(glm::vec3(1.0f, 1.0f, 1.0f)) * glm::translate(offsetX, offsetY, 0.0f);
+	return glm::scale(glm::vec3(1.0f, 1.0f, 1.0f)) * glm::translate(offsetX, offsetY, 0.0f);
+}
 
-	auto view = glm::lookAt(glm::vec3(middle.x, middle.y, model_.pos),
+glm::mat4x4 Renderer::CalculateViewTransform() const
+{
+	auto middle = (model_.min + model_.max) * 0.5f;
+
+	return glm::lookAt(glm::vec3(middle.x, middle.y, model_.pos),
 		glm::vec3(middle.x, middle.y, model_.max.z + 1.0f),
 		glm::vec3(0, -1.0f, 0));
-	auto proj = glm::ortho(-settings_.plateHeight * 0.5f * aspect, settings_.plateHeight * 0.5f * aspect,
+}
+
+glm::mat4x4 Renderer::CalculateProjectionTransform() const
+{
+	float aspect = settings_.renderWidth / (float)settings_.renderHeight;
+	auto extent = model_.max - model_.min;
+
+	return glm::ortho(-settings_.plateHeight * 0.5f * aspect, settings_.plateHeight * 0.5f * aspect,
 		-settings_.plateHeight * 0.5f, settings_.plateHeight * 0.5f,
 		0.0f, extent.z);
+}
 
-	auto wvMatrix = view * model;
-	auto wvpMatrix = proj * view * model;
+void Renderer::RenderCommon()
+{
+	const auto model = CalculateModelTransform();
+	const auto view = CalculateViewTransform();
+	const auto proj = CalculateProjectionTransform();
+
+	const auto wvMatrix = view * model;
+	const auto wvpMatrix = proj * view * model;
 
 	GL_CHECK();
 
@@ -573,6 +588,27 @@ void Renderer::AnalyzeOverhangs(uint32_t imageNumber)
 	const auto supportedPixels = static_cast<uint32_t>(ceil(settings_.maxSupportedDistance * settings_.renderWidth / settings_.plateWidth));
 	RenderOmniDilate(1.0f, supportedPixels * 2 + 1);
 	glContext_->ResetFBO();
+}
+
+std::pair<glm::vec2, glm::vec2> Renderer::GetModelProjectionRect() const
+{
+	const auto model = CalculateModelTransform();
+	const auto view = CalculateViewTransform();
+	const auto proj = CalculateProjectionTransform();
+
+	const auto screen = 
+		glm::translate(0.5f * settings_.renderWidth, 0.5f * settings_.renderHeight, 0.0f) *
+		glm::scale(0.5f * settings_.renderWidth, 0.5f * settings_.renderHeight, 1.0f);
+
+	const auto combinedMatrix = glm::transpose(screen * proj * view * model);
+	
+	const auto homoMin = glm::mul(glm::vec4(model_.min, 1.0f), combinedMatrix);
+	const auto homoMax = glm::mul(glm::vec4(model_.max, 1.0f), combinedMatrix);
+
+	const auto screenMin = glm::vec2(homoMin / homoMin.w);
+	const auto screenMax = glm::vec2(homoMax / homoMax.w);
+
+	return std::make_pair(glm::min(screenMin, screenMax), glm::max(screenMin, screenMax));
 }
 
 namespace

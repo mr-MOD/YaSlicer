@@ -8,11 +8,11 @@
 #include <map>
 
 
-void Dilate(const std::vector<uint8_t>& in, std::vector<uint8_t>& out, uint32_t width, uint32_t height)
+void Dilate(const std::vector<uint8_t>& in, std::vector<uint8_t>& out, int width, int height)
 {
-	for (auto y = 1; y < static_cast<int32_t>(height)-1; ++y)
+	for (auto y = 1; y < height-1; ++y)
 	{
-		for (auto x = 1; x < static_cast<int32_t>(width)-1; ++x)
+		for (auto x = 1; x < width-1; ++x)
 		{
 			auto m = in[y * width + x];
 			m = std::max(m, in[(y - 1) * width + (x - 1)]);
@@ -30,7 +30,7 @@ void Dilate(const std::vector<uint8_t>& in, std::vector<uint8_t>& out, uint32_t 
 }
 
 void Segmentize(const std::vector<uint8_t>& in, std::vector<uint32_t>& out, std::vector<Segment>& segments,
-	const uint32_t width, const uint32_t height, const uint8_t threshold)
+	const int width, const int height, const uint8_t threshold)
 {
 	ASSERT(in.size() == out.size());
 	// TODO: process edges
@@ -38,9 +38,9 @@ void Segmentize(const std::vector<uint8_t>& in, std::vector<uint32_t>& out, std:
 	segmentNumberMap[0] = 0;
 
 	uint32_t currentSegmentNumber = 1;
-	for (auto y = 1; y < static_cast<int32_t>(height); ++y)
+	for (auto y = 1; y < height; ++y)
 	{
-		for (auto x = 1; x < static_cast<int32_t>(width) - 1; ++x)
+		for (auto x = 1; x < width - 1; ++x)
 		{
 			if (in[y * width + x] >= threshold)
 			{
@@ -98,8 +98,8 @@ void Segmentize(const std::vector<uint8_t>& in, std::vector<uint32_t>& out, std:
 	for (size_t i = 0; i < out.size(); ++i)
 	{
 		const auto current = out[i] = segmentNumberMap[out[i]];
-		const auto currentX = static_cast<uint32_t>(i) % width;
-		const auto currentY = static_cast<uint32_t>(i) / width;
+		const auto currentX = static_cast<int>(i % width);
+		const auto currentY = static_cast<int>(i / width);
 		if (current > 0)
 		{
 			auto it = segmentData.find(current);
@@ -121,7 +121,7 @@ void Segmentize(const std::vector<uint8_t>& in, std::vector<uint32_t>& out, std:
 	});
 }
 
-float CalculateSegmentArea(const Segment& segment, float physPixelArea, const std::vector<uint8_t>& raster, const std::vector<uint32_t>& segmentedRaster, uint32_t width, uint32_t height)
+float CalculateSegmentArea(const Segment& segment, float physPixelArea, const std::vector<uint8_t>& raster, const std::vector<uint32_t>& segmentedRaster, int width, int height)
 {
 	const auto xRange = ExpandRange(segment.xBegin, segment.xEnd, 0, width);
 	const auto yRange = ExpandRange(segment.yBegin, segment.yEnd, 0, height);
