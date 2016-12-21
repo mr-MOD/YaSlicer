@@ -3,188 +3,9 @@
 
 #include <cstdint>
 #include <unordered_map>
-#include <array>
-#include <iostream>
+#include <unordered_set>
 #include <algorithm>
-#include <numeric>
-
-void RemoveVbHoles(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib)
-{
-	ASSERT(vb.size() == nb.size());
-
-	auto vtxCount = vb.size() / 3;
-	std::vector<uint8_t> useCount(vtxCount, 0);
-	for (auto idx : ib)
-	{
-		++useCount[idx];
-	}
-
-	std::vector<uint32_t> reIndex(vtxCount);
-	for (auto i = 0u; i < reIndex.size(); ++i)
-	{
-		reIndex[i] = i;
-	}
-	
-	size_t totalOffset = 0;
-	auto it = useCount.begin();
-	while (it != useCount.end())
-	{
-		auto usedVertsRangeEndIt = std::find_if(it, useCount.end(), [](uint8_t v) {
-			return v == 0;
-		});
-		auto reIndexRangeBeginIt = reIndex.begin() + std::distance(useCount.begin(), it);
-		auto reIndexRangeEndIt = reIndex.begin() + std::distance(useCount.begin(), usedVertsRangeEndIt);
-		for (auto reIndexIt = reIndexRangeBeginIt; reIndexIt != reIndexRangeEndIt; ++reIndexIt)
-		{
-			*reIndexIt -= static_cast<uint32_t>(totalOffset);
-		}
-
-		auto nextUsedVtxIt = std::find_if(usedVertsRangeEndIt, useCount.end(), [](uint8_t v) {
-			return v > 0;
-		});
-		
-		totalOffset += std::distance(usedVertsRangeEndIt, nextUsedVtxIt);
-		it = nextUsedVtxIt;
-	}
-	for (auto& idx : ib)
-	{
-		idx = reIndex[idx];
-	}
-	// special remove_if
-	typedef std::array<float, 3> Vertex;
-
-	auto vbResult = reinterpret_cast<Vertex*>(vb.data());
-	auto vbFirst = reinterpret_cast<Vertex*>(vb.data());
-	auto nbResult = reinterpret_cast<Vertex*>(nb.data());
-	auto nbFirst = reinterpret_cast<Vertex*>(nb.data());
-
-	auto ucFirst = useCount.begin();
-	auto ucLast = useCount.end();
-	while (ucFirst != ucLast) {
-		if (*ucFirst > 0) {
-			*vbResult = *vbFirst;
-			*nbResult = *nbFirst;
-			++vbResult;
-			++nbResult;
-		}
-		++ucFirst;
-		++vbFirst;
-		++nbFirst;
-	}
-	auto vbEraseStart = vb.begin() + std::distance(reinterpret_cast<Vertex*>(vb.data()), vbResult) * 3;
-	vb.erase(vbEraseStart, vb.end());
-	auto nbEraseStart = nb.begin() + std::distance(reinterpret_cast<Vertex*>(nb.data()), nbResult) * 3;
-	nb.erase(nbEraseStart, nb.end());
-}
-
-void SplitMesh(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
-	const std::function<void(const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib)>& onMesh)
-{
-	ASSERT(vb.size() == nb.size());
-
-	typedef std::array<uint32_t, 3> Triangle;
-
-	// make last triangle index max of 3
-	auto startIt = reinterpret_cast<Triangle*>(ib.data());
-	auto endIt = startIt + ib.size() / 3;
-	std::for_each(startIt, endIt, [](Triangle& t) {
-		if (t[0] > t[1] && t[0] > t[2])
-		{
-			std::swap(t[0], t[1]);
-			std::swap(t[1], t[2]);
-		}
-		if (t[1] > t[0] && t[1] > t[2])
-		{
-			std::swap(t[0], t[2]);
-			std::swap(t[1], t[2]);
-		}
-	});
-
-	std::vector<float> curVb;
-	curVb.reserve(maxVertsInBuffer * 3);
-	std::vector<float> curNb;
-	curNb.reserve(maxVertsInBuffer * 3);
-	std::vector<uint32_t> curIb;
-	curIb.reserve(maxVertsInBuffer * 3);
-
-	while (true)
-	{
-		auto startIt = reinterpret_cast<Triangle*>(ib.data());
-		auto endIt = startIt + ib.size() / 3;
-
-		if (startIt == endIt)
-		{
-			break;
-		}
-
-		auto threeVertsRangeEndIt = std::partition(startIt, endIt, [maxVertsInBuffer](const Triangle& tri) {
-			return tri[2] < maxVertsInBuffer;
-		});
-
-		auto curStepIdxEnd = threeVertsRangeEndIt;
-		if (threeVertsRangeEndIt == startIt)
-		{
-			std::unordered_map<uint32_t, uint32_t> uniqueVertexCounter;
-			auto it = startIt;
-			for (; it < endIt && uniqueVertexCounter.size() <= maxVertsInBuffer - 3; ++it)
-			{
-				const auto tri = *it;
-				++uniqueVertexCounter[tri[0]];
-				++uniqueVertexCounter[tri[1]];
-				++uniqueVertexCounter[tri[2]];
-			}
-
-			if (uniqueVertexCounter.empty())
-			{
-				throw std::runtime_error("too complex mesh, can't split");
-			}
-
-			auto maxIndex = std::max_element(uniqueVertexCounter.begin(), uniqueVertexCounter.end(),
-				[](const std::pair<uint32_t, uint32_t>& v1, const std::pair<uint32_t, uint32_t>& v2) {
-					return v1.first < v2.first;
-				})->first;
-
-			curStepIdxEnd = it;
-			curVb.resize((maxIndex + 1) * 3);
-			curNb.resize((maxIndex + 1) * 3);
-		}
-		else
-		{
-			curVb.resize(maxVertsInBuffer * 3);
-			curNb.resize(maxVertsInBuffer * 3);
-		}
-		
-		curIb.assign(reinterpret_cast<uint32_t*>(startIt), reinterpret_cast<uint32_t*>(curStepIdxEnd));
-		for (auto idx : curIb)
-		{
-			curVb[idx * 3 + 0] = vb[idx * 3 + 0];
-			curVb[idx * 3 + 1] = vb[idx * 3 + 1];
-			curVb[idx * 3 + 2] = vb[idx * 3 + 2];
-
-			curNb[idx * 3 + 0] = nb[idx * 3 + 0];
-			curNb[idx * 3 + 1] = nb[idx * 3 + 1];
-			curNb[idx * 3 + 2] = nb[idx * 3 + 2];
-		}
-
-		RemoveVbHoles(curVb, curNb, curIb);
-		onMesh(curVb, curNb, curIb);
-
-		auto idxCount = std::distance(startIt, curStepIdxEnd) * 3;
-		ib.erase(ib.begin(), ib.begin() + idxCount);
-		RemoveVbHoles(vb, nb, ib);
-	}
-}
-
-glm::float16 toFloat16(float f)
-{
-	return glm::float16(f);
-}
-
-void ConvertToFloat16(const std::vector<float>& in, std::vector<glm::float16>& out)
-{
-	out.resize(in.size());
-	std::transform(in.begin(), in.end(), out.begin(), toFloat16);
-}
+#include <queue>
 
 std::vector<float> CalculateNormals(const std::vector<float>& vb, const std::vector<uint32_t>& ib)
 {
@@ -222,6 +43,241 @@ std::vector<float> CalculateNormals(const std::vector<float>& vb, const std::vec
 		normals[i + 2] = n.z;
 	}
 	return normals;
+}
+
+using Edge = uint64_t;
+
+Edge GetEdgeId(uint32_t vertex0, uint32_t vertex1)
+{
+	uint64_t minIndex;
+	uint64_t maxIndex;
+	if (vertex0 < vertex1)
+	{
+		minIndex = vertex0;
+		maxIndex = vertex1;
+	}
+	else
+	{
+		minIndex = vertex1;
+		maxIndex = vertex0;
+	}
+	return minIndex | (maxIndex << 32);
+}
+
+struct FaceList
+{
+	uint32_t faces[2];
+	uint32_t end = 0;
+};
+
+using EdgeFacesIncidenceMap = std::vector<std::pair<Edge, FaceList>>;
+auto FindEdge(EdgeFacesIncidenceMap& edgeMap, Edge edge)
+{
+	return std::lower_bound(edgeMap.begin(), edgeMap.end(), edge, [](const auto& val, const auto& el) { return val.first < el; });
+}
+
+void PushFace(EdgeFacesIncidenceMap& edgeStorage, Edge edge, uint32_t faceIndex)
+{
+	auto it = FindEdge(edgeStorage, edge);
+	ASSERT(it != edgeStorage.end() && it->first == edge);
+	auto& faceList = it->second;
+	faceList.faces[faceList.end++] = faceIndex;
+}
+
+std::vector<AdjacentFaces> BuildFacesAdjacency(const std::vector<uint32_t>& ib)
+{
+	struct Face
+	{
+		uint32_t vertex[3];
+	};
+
+	auto faces = reinterpret_cast<const Face*>(ib.data());
+	const auto faceCount = ib.size() / 3;
+	
+	EdgeFacesIncidenceMap edgeFacesIncidence;
+	edgeFacesIncidence.reserve(faceCount * 3);
+	for (size_t i = 0; i < faceCount; ++i)
+	{
+		const auto& vertices = faces[i].vertex;
+		edgeFacesIncidence.emplace_back(GetEdgeId(vertices[0], vertices[1]), FaceList());
+		edgeFacesIncidence.emplace_back(GetEdgeId(vertices[1], vertices[2]), FaceList());
+		edgeFacesIncidence.emplace_back(GetEdgeId(vertices[2], vertices[0]), FaceList());
+	}
+	std::sort(edgeFacesIncidence.begin(), edgeFacesIncidence.end(),
+		[](const auto& a, const auto& b) { return a.first < b.first; });
+	edgeFacesIncidence.erase(std::unique(edgeFacesIncidence.begin(), edgeFacesIncidence.end(),
+		[](const auto& a, const auto& b) { return a.first == b.first; }), edgeFacesIncidence.end());
+
+	for (size_t i = 0; i < faceCount; ++i)
+	{
+		const auto& vertices = faces[i].vertex;
+	
+		const auto edge0 = GetEdgeId(vertices[0], vertices[1]);
+		const auto edge1 = GetEdgeId(vertices[1], vertices[2]);
+		const auto edge2 = GetEdgeId(vertices[2], vertices[0]);
+
+		PushFace(edgeFacesIncidence, edge0, static_cast<uint32_t>(i));
+		PushFace(edgeFacesIncidence, edge1, static_cast<uint32_t>(i));
+		PushFace(edgeFacesIncidence, edge2, static_cast<uint32_t>(i));
+	}
+	
+	std::vector<AdjacentFaces> result;
+	result.resize(faceCount);
+
+	const auto faceVertexCount = _countof(faces[0].vertex);
+	std::vector<uint32_t> adjacentFaces;
+	for (size_t i = 0; i < faceCount; ++i)
+	{
+		adjacentFaces.clear();
+		const auto& vertices = faces[i].vertex;
+		for (auto n = 0; n < faceVertexCount; ++n)
+		{
+			const auto edge = GetEdgeId(vertices[n], vertices[(n + 1) % faceVertexCount]);
+
+			const auto& facesShareEdge = FindEdge(edgeFacesIncidence, edge)->second;
+			adjacentFaces.insert(adjacentFaces.end(), facesShareEdge.faces, facesShareEdge.faces + facesShareEdge.end);
+		}
+
+		adjacentFaces.erase(std::remove(adjacentFaces.begin(), adjacentFaces.end(), i), adjacentFaces.end());
+		auto& currentResult = result[i];
+		CHECK(adjacentFaces.size() == _countof(currentResult.faces));
+		std::copy(adjacentFaces.begin(), adjacentFaces.end(), currentResult.faces);
+	}
+
+	return result;
+}
+
+class RemapBuilder
+{
+public:
+	RemapBuilder(const uint32_t maxVertices) : maxVertices_(maxVertices) {}
+
+	bool AddFace(uint32_t v0, uint32_t v1, uint32_t v2)
+	{
+		const bool canAddFace =
+			verticesInUse_.size() +
+			(verticesInUse_.count(v0) ? 0 : 1) +
+			(verticesInUse_.count(v1) ? 0 : 1) +
+			(verticesInUse_.count(v2) ? 0 : 1) <= maxVertices_;
+
+		if (!canAddFace)
+		{
+			return false;
+		}
+
+		verticesInUse_.insert(v0);
+		verticesInUse_.insert(v1);
+		verticesInUse_.insert(v2);
+
+		ib_.push_back(v0);
+		ib_.push_back(v1);
+		ib_.push_back(v2);
+
+		return true;
+	}
+
+	std::unordered_map<uint32_t, uint32_t> BuildRemap()
+	{
+		std::unordered_map<uint32_t, uint32_t> remap;
+		remap.reserve(verticesInUse_.size());
+		
+		uint32_t vertexCounter = 0;
+		for (const auto& v : verticesInUse_)
+		{
+			remap[v] = vertexCounter++;
+		}
+		return remap;
+	}
+
+	const std::vector<uint32_t>& GetIB() const { return ib_;  }
+
+	void Clear()
+	{
+		verticesInUse_.clear();
+		ib_.clear();
+	}
+
+private:
+	const uint32_t maxVertices_;
+	std::unordered_set<uint32_t> verticesInUse_;
+	std::vector<uint32_t> ib_;
+};
+
+void MakeMesh(const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib,
+	const std::unordered_map<uint32_t, uint32_t>& mapOldToNewIndex,
+	const std::function<void(const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib)>& onMesh)
+{
+	std::vector<float> meshVb;
+	std::vector<float> meshNb;
+	std::vector<uint32_t> meshIb;
+
+	meshVb.resize(mapOldToNewIndex.size() * 3);
+	meshNb.resize(mapOldToNewIndex.size() * 3);
+	meshIb.reserve(ib.size());
+
+	for (const auto& v : mapOldToNewIndex)
+	{
+		std::copy(vb.begin() + v.first * 3, vb.begin() + v.first * 3 + 3, meshVb.begin() + v.second * 3);
+		std::copy(nb.begin() + v.first * 3, nb.begin() + v.first * 3 + 3, meshNb.begin() + v.second * 3);
+	}
+
+	for (const auto oldIdx : ib)
+	{
+		meshIb.push_back(mapOldToNewIndex.at(oldIdx));
+	}
+
+	onMesh(meshVb, meshNb, meshIb);
+}
+
+void SplitMesh(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
+	const std::function<void(const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib)>& onMesh)
+{
+	auto adjacency = BuildFacesAdjacency(ib);
+
+	ASSERT(adjacency.size() == ib.size() / 3);
+
+	const bool NotProcessed = false;
+	const bool AlreadyProcessed = true;
+
+	std::vector<bool> faceProcessingState(ib.size() / 3, NotProcessed);
+	std::queue<uint32_t> faceQueue;
+	RemapBuilder remapBuilder(maxVertsInBuffer);
+
+	// BFS on face graph
+	auto it = faceProcessingState.end();
+	while ((it = std::find(faceProcessingState.begin(), faceProcessingState.end(), NotProcessed)) != faceProcessingState.end())
+	{
+		auto nextFace = static_cast<uint32_t>(std::distance(faceProcessingState.begin(), it));
+		faceQueue.push(nextFace);
+		faceProcessingState[nextFace] = AlreadyProcessed;
+		while (!faceQueue.empty())
+		{
+			const auto face = faceQueue.front();
+			faceQueue.pop();
+
+			if (!remapBuilder.AddFace(ib[face * 3 + 0], ib[face * 3 + 1], ib[face * 3 + 2]))
+			{
+				MakeMesh(vb, nb, remapBuilder.GetIB(), remapBuilder.BuildRemap(), onMesh);
+
+				remapBuilder.Clear();
+				remapBuilder.AddFace(ib[face * 3 + 0], ib[face * 3 + 1], ib[face * 3 + 2]);
+			}
+			
+			for (auto i = 0; i < _countof(adjacency[face].faces); ++i)
+			{
+				if (!faceProcessingState[adjacency[face].faces[i]])
+				{
+					faceQueue.push(adjacency[face].faces[i]);
+					faceProcessingState[adjacency[face].faces[i]] = AlreadyProcessed;
+				}
+			}
+		}
+	}
+
+	if (remapBuilder.GetIB().size())
+	{
+		MakeMesh(vb, nb, remapBuilder.GetIB(), remapBuilder.BuildRemap(), onMesh);
+	}
 }
 
 void testRemoveVbHoles()

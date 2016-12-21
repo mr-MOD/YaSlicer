@@ -12,7 +12,7 @@
 #include <cstring>
 #include <algorithm>
 
-const auto MaxVerticesPerBuffer = 64000;
+const auto MaxVerticesPerBuffer = 65500;
 
 struct Key
 {
