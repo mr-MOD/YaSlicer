@@ -1,6 +1,7 @@
 #include "Loaders.h"
 #include "Geometry.h"
 #include "CacheOpt.h"
+#include "PerfTimer.h"
 
 #include <array>
 #include <functional>
@@ -64,6 +65,8 @@ private:
 
 void LoadStl(const std::string& file, std::vector<float>& vb, std::vector<uint32_t>& ib)
 {
+	PerfTimer readStlTime("Read STL");
+
 	std::fstream f(file, std::ios::in | std::ios::binary);
 	if (f.fail() || f.bad())
 	{
@@ -146,6 +149,10 @@ void LoadStl(const std::string& file, std::vector<float>& vb, std::vector<uint32
 
 	vertexBuffer.swap(vb);
 	indexBuffer.swap(ib);
+
+	BOOST_LOG_TRIVIAL(info) << "STL triangles: " << numTriangles;
+	BOOST_LOG_TRIVIAL(info) << "STL raw vertices: " << numTriangles * 3;
+	BOOST_LOG_TRIVIAL(info) << "STL optimized vertices: " << vb.size() / 3;
 }
 
 void LoadObj(const std::string& file, std::vector<float>& vb, std::vector<uint32_t>& ib)
@@ -233,6 +240,8 @@ void LoadModel(const std::string& file, const std::function<void(
 	}
 
 	auto nb = CalculateNormals(vb, ib);
+
+	PerfTimer splitMeshTime("Split mesh");
 
 	static_assert(MaxVerticesPerBuffer < std::numeric_limits<uint16_t>::max(), "Vertex index must fit uint16_t");
 	SplitMesh(vb, nb, ib, MaxVerticesPerBuffer,

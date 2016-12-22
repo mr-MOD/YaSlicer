@@ -4,6 +4,7 @@
 
 #include <PngFile.h>
 #include <Raster.h>
+#include <PerfTimer.h>
 #include <ErrorHandling.h>
 
 #include <memory>
@@ -14,10 +15,14 @@
 #include <string>
 #include <algorithm>
 #include <thread>
-#include <chrono>
 
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
+#include <boost/log/core.hpp>
+#include <boost/log/trivial.hpp>
+#include <boost/log/expressions.hpp>
+
+#include <psapi.h>
 
 void WriteWhiteLayers(const Settings& settings, const std::pair<glm::vec2, glm::vec2>& bounds)
 {
@@ -37,19 +42,24 @@ void WriteWhiteLayers(const Settings& settings, const std::pair<glm::vec2, glm::
 		data[y * settings.renderWidth + x] = WhiteColorPaletteIndex;
 	});
 
+	const auto palette = CreateGrayscalePalette();
 	for (uint32_t i = 0; i < settings.whiteLayers; ++i)
 	{
 		const auto filePath = (outputDir / GetOutputFileName(settings, i)).string();
-		WritePng(filePath, settings.renderWidth, settings.renderHeight, 8, data, CreateGrayscalePalette());
+		WritePng(filePath, settings.renderWidth, settings.renderHeight, 8, data, palette);
 	}	
 }
 
-void RenderModel(Renderer& r, const Settings& settings)
+void RenderModel(Renderer& r, const Settings& settings, bool simulate)
 {
-	auto tStart = std::chrono::high_resolution_clock::now();
+	PerfTimer renderTime("Render time");
 	const auto outputDir = boost::filesystem::path(settings.outputDir);
-
-	WriteWhiteLayers(settings, r.GetModelProjectionRect());
+	
+	if (!simulate)
+	{
+		boost::filesystem::create_directories(settings.outputDir);
+		WriteWhiteLayers(settings, r.GetModelProjectionRect());
+	}
 	
 	uint32_t nSlice = 0;
 	uint32_t imageNumber = settings.whiteLayers;
@@ -57,7 +67,11 @@ void RenderModel(Renderer& r, const Settings& settings)
 	do
 	{
 		auto filePath = (outputDir / GetOutputFileName(settings, imageNumber++)).string();
-		r.SavePng(filePath);
+
+		if (!simulate)
+		{
+			r.SavePng(filePath);
+		}
 
 		if (settings.doOverhangAnalysis)
 		{
@@ -68,18 +82,22 @@ void RenderModel(Renderer& r, const Settings& settings)
 		{
 			r.ERM();
 			filePath = (outputDir / GetOutputFileName(settings, imageNumber++)).string();
-			r.SavePng(filePath);
+
+			if (!simulate)
+			{
+				r.SavePng(filePath);
+			}
 		}
 
 		++nSlice;
 	} while (r.NextSlice());
 
-	WriteEnvisiontechConfig(settings, "job.cfg", nSlice);
+	BOOST_LOG_TRIVIAL(info) << "Total slices: " << nSlice;
 
-	auto tRender = std::chrono::high_resolution_clock::now();
-	auto renderTime = std::chrono::duration_cast<std::chrono::milliseconds>(tRender - tStart).count();
-	std::cout << "Render: " << renderTime <<
-		" ms, " << (nSlice * 1000.0) / renderTime << " FPS" << std::endl;
+	if (!simulate)
+	{
+		WriteEnvisiontechConfig(settings, "job.cfg", nSlice);
+	}
 }
 
 int main(int argc, char** argv)
@@ -87,6 +105,8 @@ int main(int argc, char** argv)
 	try
 	{
 		Settings settings;
+		bool simulate = false;
+		bool verbose = false;
 		std::string configFile;
 
 		namespace po = boost::program_options;
@@ -134,6 +154,9 @@ int main(int argc, char** argv)
 
 			("mirrorX", po::value<bool>(&settings.mirrorX)->default_value(settings.mirrorX), "mirror image horizontally")
 			("mirrorY", po::value<bool>(&settings.mirrorY)->default_value(settings.mirrorY), "mirror image vertically")
+
+			("simulate", po::value<bool>(&simulate)->default_value(simulate), "do not save files")
+			("verbose", po::value<bool>(&verbose)->default_value(verbose), "print extended information")
 			;
 
 		po::options_description cmdline_options;
@@ -162,14 +185,24 @@ int main(int argc, char** argv)
 			return 0;
 		}
 
-		boost::filesystem::create_directories(settings.outputDir);
+		if (!verbose)
+		{
+			boost::log::core::get()->set_filter
+			(
+				boost::log::trivial::severity > boost::log::trivial::info
+			);
+		}
 
 		Renderer r(settings);
-		RenderModel(r, settings);
+		RenderModel(r, settings, simulate);
+
+		PROCESS_MEMORY_COUNTERS pmc{};
+		GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
+		BOOST_LOG_TRIVIAL(info) << "Peak working set: " << pmc.PeakWorkingSetSize / 1024 / 1024 << " MB";
 	}
 	catch (const std::exception& e)
 	{
-		std::cerr << e.what() << std::endl;
+		BOOST_LOG_TRIVIAL(fatal) << e.what();
 		return 1;
 	}
 

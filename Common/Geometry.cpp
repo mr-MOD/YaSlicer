@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <algorithm>
 #include <queue>
+#include <iterator>
 
 std::vector<float> CalculateNormals(const std::vector<float>& vb, const std::vector<uint32_t>& ib)
 {
@@ -66,22 +67,21 @@ Edge GetEdgeId(uint32_t vertex0, uint32_t vertex1)
 
 struct FaceList
 {
-	uint32_t faces[2];
-	uint32_t end = 0;
+	boost::container::small_vector<uint32_t, 2> faces;
 };
 
 using EdgeFacesIncidenceMap = std::vector<std::pair<Edge, FaceList>>;
-auto FindEdge(EdgeFacesIncidenceMap& edgeMap, Edge edge)
+auto FindEdgeData(EdgeFacesIncidenceMap& edgeMap, Edge edge)
 {
-	return std::lower_bound(edgeMap.begin(), edgeMap.end(), edge, [](const auto& val, const auto& el) { return val.first < el; });
+	return std::lower_bound(edgeMap.begin(), edgeMap.end(), edge,
+		[](const auto& val, const auto& el) { return val.first < el; });
 }
 
 void PushFace(EdgeFacesIncidenceMap& edgeStorage, Edge edge, uint32_t faceIndex)
 {
-	auto it = FindEdge(edgeStorage, edge);
-	ASSERT(it != edgeStorage.end() && it->first == edge);
+	auto it = FindEdgeData(edgeStorage, edge);
 	auto& faceList = it->second;
-	faceList.faces[faceList.end++] = faceIndex;
+	faceList.faces.push_back(faceIndex);
 }
 
 std::vector<AdjacentFaces> BuildFacesAdjacency(const std::vector<uint32_t>& ib)
@@ -134,14 +134,13 @@ std::vector<AdjacentFaces> BuildFacesAdjacency(const std::vector<uint32_t>& ib)
 		{
 			const auto edge = GetEdgeId(vertices[n], vertices[(n + 1) % faceVertexCount]);
 
-			const auto& facesShareEdge = FindEdge(edgeFacesIncidence, edge)->second;
-			adjacentFaces.insert(adjacentFaces.end(), facesShareEdge.faces, facesShareEdge.faces + facesShareEdge.end);
+			const auto& facesShareEdge = FindEdgeData(edgeFacesIncidence, edge)->second;
+			adjacentFaces.insert(adjacentFaces.end(), std::begin(facesShareEdge.faces), std::end(facesShareEdge.faces));
 		}
 
 		adjacentFaces.erase(std::remove(adjacentFaces.begin(), adjacentFaces.end(), i), adjacentFaces.end());
 		auto& currentResult = result[i];
-		CHECK(adjacentFaces.size() == _countof(currentResult.faces));
-		std::copy(adjacentFaces.begin(), adjacentFaces.end(), currentResult.faces);
+		std::copy(adjacentFaces.begin(), adjacentFaces.end(), std::back_inserter(currentResult.faces));
 	}
 
 	return result;
@@ -262,13 +261,13 @@ void SplitMesh(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint3
 				remapBuilder.Clear();
 				remapBuilder.AddFace(ib[face * 3 + 0], ib[face * 3 + 1], ib[face * 3 + 2]);
 			}
-			
-			for (auto i = 0; i < _countof(adjacency[face].faces); ++i)
+
+			for (const auto face : adjacency[face].faces)
 			{
-				if (!faceProcessingState[adjacency[face].faces[i]])
+				if (!faceProcessingState[face])
 				{
-					faceQueue.push(adjacency[face].faces[i]);
-					faceProcessingState[adjacency[face].faces[i]] = AlreadyProcessed;
+					faceQueue.push(face);
+					faceProcessingState[face] = AlreadyProcessed;
 				}
 			}
 		}

@@ -11,6 +11,7 @@
 #include <PngFile.h>
 #include <Loaders.h>
 #include <Raster.h>
+#include <PerfTimer.h>
 #include <Geometry.h>
 
 #include <stdexcept>
@@ -136,6 +137,7 @@ Renderer::~Renderer()
 
 void Renderer::CreateGeometryBuffers()
 {
+	PerfTimer loadModel("Load model");
 	model_.min.x = model_.min.y = model_.min.z = std::numeric_limits<float>::max();
 	model_.max.x = model_.max.y = model_.max.z = std::numeric_limits<float>::lowest();
 
@@ -173,11 +175,14 @@ void Renderer::CreateGeometryBuffers()
 	});
 	model_.pos = model_.min.z;
 
-	auto extent = model_.max - model_.min;
+	const auto extent = model_.max - model_.min;
 	if (extent.x > settings_.plateWidth || extent.y > settings_.plateHeight)
 	{
 		throw std::runtime_error("Model is larger than platform");
 	}
+
+	BOOST_LOG_TRIVIAL(info) << "Split parts: " << triCount_.size();
+	BOOST_LOG_TRIVIAL(info) << "Model dimensions: " << extent.x << " x " << extent.y << " x " << extent.z;
 }
 
 uint32_t Renderer::GetLayersCount() const
@@ -230,15 +235,15 @@ void Renderer::Render()
 
 glm::mat4x4 Renderer::CalculateModelTransform() const
 {
-	auto offsetX = (settings_.plateWidth / settings_.renderWidth) * modelOffset_.x;
-	auto offsetY = (settings_.plateHeight / settings_.renderHeight) * modelOffset_.y;
+	const auto offsetX = (settings_.plateWidth / settings_.renderWidth) * modelOffset_.x;
+	const auto offsetY = (settings_.plateHeight / settings_.renderHeight) * modelOffset_.y;
 
 	return glm::scale(glm::vec3(1.0f, 1.0f, 1.0f)) * glm::translate(offsetX, offsetY, 0.0f);
 }
 
 glm::mat4x4 Renderer::CalculateViewTransform() const
 {
-	auto middle = (model_.min + model_.max) * 0.5f;
+	const auto middle = (model_.min + model_.max) * 0.5f;
 
 	return glm::lookAt(glm::vec3(middle.x, middle.y, model_.pos),
 		glm::vec3(middle.x, middle.y, model_.max.z + 1.0f),
@@ -247,8 +252,8 @@ glm::mat4x4 Renderer::CalculateViewTransform() const
 
 glm::mat4x4 Renderer::CalculateProjectionTransform() const
 {
-	float aspect = settings_.renderWidth / (float)settings_.renderHeight;
-	auto extent = model_.max - model_.min;
+	const float aspect = settings_.renderWidth / (float)settings_.renderHeight;
+	const auto extent = model_.max - model_.min;
 
 	return glm::ortho(-settings_.plateHeight * 0.5f * aspect, settings_.plateHeight * 0.5f * aspect,
 		-settings_.plateHeight * 0.5f, settings_.plateHeight * 0.5f,
@@ -531,33 +536,36 @@ void Renderer::SavePng(const std::string& fileName)
 		raster_ = glContext_->GetRaster();
 	}
 
-	auto pixData = std::make_shared<std::vector<uint8_t>>(std::move(raster_));
-	auto concurrency = settings_.queue;
-	bool runOnMainThread = pngSaveResult_.size() > concurrency;
+	auto pixData = std::make_shared<const std::vector<uint8_t>>(std::move(raster_));
+	const auto concurrency = settings_.queue;
+	const bool clearCompletedTasks = pngSaveResult_.size() > concurrency;
 
 	const auto targetWidth = settings_.renderWidth;
 	const auto targetHeight = settings_.renderHeight;
-	auto future = std::async([pixData, fileName, targetWidth, targetHeight, this]() {
+	auto future = std::async(std::launch::async, [pixData, fileName, targetWidth, targetHeight, this]() {
 		const auto BitsPerChannel = 8;
 		WritePng(fileName, targetWidth, targetHeight, BitsPerChannel, *pixData, this->palette_);
 	});
 	
-	if (runOnMainThread)
+	if (clearCompletedTasks)
 	{
-		future.get();
-		pngSaveResult_.erase(std::remove_if(pngSaveResult_.begin(), pngSaveResult_.end(), [](std::future<void>& v){
+		pngSaveResult_.erase(std::remove_if(pngSaveResult_.begin(), pngSaveResult_.end(), [](std::future<void>& v) {
 			return v.wait_for(std::chrono::milliseconds::zero()) == std::future_status::ready;
 		}), pngSaveResult_.end());
+
+		if (pngSaveResult_.size() > concurrency)
+		{
+			future.get();
+			return;
+		}
 	}
-	else
-	{
-		pngSaveResult_.emplace_back(std::move(future));
-	}
+
+	pngSaveResult_.emplace_back(std::move(future));
 }
 
 void Renderer::ERM()
 {
-	glm::vec2 offset(0.5f, 0.5f);
+	const glm::vec2 offset(0.5f, 0.5f);
 	modelOffset_ -= offset;
 
 	BOOST_SCOPE_EXIT(&offset, &modelOffset_)
