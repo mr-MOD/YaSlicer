@@ -11,7 +11,7 @@
 std::vector<float> CalculateNormals(const std::vector<float>& vb, const std::vector<uint32_t>& ib)
 {
 	std::vector<float> normals(vb.size(), 0.0f);
-	for (size_t i = 0; i < ib.size(); i += 3)
+	for (size_t i = 0, size = ib.size(); i < size; i += 3)
 	{
 		auto iA = ib[i + 0];
 		auto iB = ib[i + 1];
@@ -35,7 +35,7 @@ std::vector<float> CalculateNormals(const std::vector<float>& vb, const std::vec
 		normals[iC * 3 + 2] += normal.z;
 	}
 
-	for (size_t i = 0; i < normals.size(); i += 3)
+	for (size_t i = 0, size = normals.size(); i < size; i += 3)
 	{
 		glm::vec3 n(normals[i + 0], normals[i + 1], normals[i + 2]);
 		n = glm::normalize(n);
@@ -228,54 +228,98 @@ void MakeMesh(const std::vector<float>& vb, const std::vector<float>& nb, const 
 	onMesh(meshVb, meshNb, meshIb);
 }
 
-void SplitMesh(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
-	const std::function<void(const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib)>& onMesh)
+std::vector<std::vector<uint32_t>> BuildLayers(const std::vector<float>& vb, const std::vector<uint32_t>& ib, int layerCount)
 {
-	auto adjacency = BuildFacesAdjacency(ib);
-
-	ASSERT(adjacency.size() == ib.size() / 3);
-
-	const bool NotProcessed = false;
-	const bool AlreadyProcessed = true;
-
-	std::vector<bool> faceProcessingState(ib.size() / 3, NotProcessed);
-	std::queue<uint32_t> faceQueue;
-	RemapBuilder remapBuilder(maxVertsInBuffer);
-
-	// BFS on face graph
-	auto it = faceProcessingState.end();
-	while ((it = std::find(faceProcessingState.begin(), faceProcessingState.end(), NotProcessed)) != faceProcessingState.end())
+	layerCount = std::max(1, layerCount);
+	if (layerCount == 1)
 	{
-		auto nextFace = static_cast<uint32_t>(std::distance(faceProcessingState.begin(), it));
-		faceQueue.push(nextFace);
-		faceProcessingState[nextFace] = AlreadyProcessed;
-		while (!faceQueue.empty())
+		return std::vector<std::vector<uint32_t>>(1, ib);
+	}
+
+	auto verticesBegin = reinterpret_cast<const glm::vec3*>(vb.data());
+	auto verticesEnd = verticesBegin + vb.size() / 3;
+	auto meshMinMaxZ = std::minmax_element(verticesBegin, verticesEnd, [](const auto& a, const auto& b) {
+		return a.z < b.z;
+	});
+
+	const auto layerHeight = (meshMinMaxZ.second->z - meshMinMaxZ.first->z) / layerCount;
+
+	std::vector<std::vector<uint32_t>> result(layerCount + 1);
+	const auto crossLayerIndex = layerCount;
+	for (size_t i = 0, size = ib.size(); i < size; i += 3)
+	{
+		const uint32_t v[] = { ib[i + 0], ib[i + 1], ib[i + 2] };
+		const auto minMaxItPair = std::minmax_element(std::begin(v), std::end(v),
+			[verts = verticesBegin](const auto& a, const auto& b) { return verts[a].z < verts[b].z; });
+		const auto faceMinZ = verticesBegin[*minMaxItPair.first].z;
+		const auto faceMaxZ = verticesBegin[*minMaxItPair.second].z;
+
+		const auto layerNumberMin = std::min(layerCount - 1, static_cast<int>((faceMinZ - meshMinMaxZ.first->z) / layerHeight));
+		const auto layerNumberMax = std::min(layerCount - 1, static_cast<int>((faceMaxZ - meshMinMaxZ.first->z) / layerHeight));
+
+		const auto layerNumber = layerNumberMin == layerNumberMax ? layerNumberMin : crossLayerIndex;
+
+		auto& layerIb = result[layerNumber];
+		layerIb.insert(layerIb.end(), std::begin(v), std::end(v));
+	}
+
+	return result;
+}
+
+void SplitMesh(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
+	const MeshCallback& onMesh)
+{
+	const auto LayerCount = 5;
+	const auto layersIb = BuildLayers(vb, ib, LayerCount);
+
+	for (const auto& currentIb : layersIb)
+	{
+		const auto adjacency = BuildFacesAdjacency(currentIb);
+
+		ASSERT(adjacency.size() == currentIb.size() / 3);
+
+		const bool NotProcessed = false;
+		const bool AlreadyProcessed = true;
+
+		std::vector<bool> faceProcessingState(currentIb.size() / 3, NotProcessed);
+		std::queue<uint32_t> faceQueue;
+		RemapBuilder remapBuilder(maxVertsInBuffer);
+
+		// BFS on face graph
+		auto it = faceProcessingState.end();
+		while ((it = std::find(faceProcessingState.begin(), faceProcessingState.end(), NotProcessed)) != faceProcessingState.end())
 		{
-			const auto face = faceQueue.front();
-			faceQueue.pop();
-
-			if (!remapBuilder.AddFace(ib[face * 3 + 0], ib[face * 3 + 1], ib[face * 3 + 2]))
+			const auto nextFace = static_cast<uint32_t>(std::distance(faceProcessingState.begin(), it));
+			faceQueue.push(nextFace);
+			faceProcessingState[nextFace] = AlreadyProcessed;
+			while (!faceQueue.empty())
 			{
-				MakeMesh(vb, nb, remapBuilder.GetIB(), remapBuilder.BuildRemap(), onMesh);
+				const auto face = faceQueue.front();
+				faceQueue.pop();
 
-				remapBuilder.Clear();
-				remapBuilder.AddFace(ib[face * 3 + 0], ib[face * 3 + 1], ib[face * 3 + 2]);
-			}
-
-			for (const auto face : adjacency[face].faces)
-			{
-				if (!faceProcessingState[face])
+				if (!remapBuilder.AddFace(currentIb[face * 3 + 0], currentIb[face * 3 + 1], currentIb[face * 3 + 2]))
 				{
-					faceQueue.push(face);
-					faceProcessingState[face] = AlreadyProcessed;
+					MakeMesh(vb, nb, remapBuilder.GetIB(), remapBuilder.BuildRemap(), onMesh);
+
+					remapBuilder.Clear();
+					remapBuilder.AddFace(currentIb[face * 3 + 0], currentIb[face * 3 + 1], currentIb[face * 3 + 2]);
+				}
+
+				for (const auto face : adjacency[face].faces)
+				{
+					if (!faceProcessingState[face])
+					{
+						faceQueue.push(face);
+						faceProcessingState[face] = AlreadyProcessed;
+					}
 				}
 			}
 		}
-	}
 
-	if (remapBuilder.GetIB().size())
-	{
-		MakeMesh(vb, nb, remapBuilder.GetIB(), remapBuilder.BuildRemap(), onMesh);
+		if (remapBuilder.GetIB().size())
+		{
+			MakeMesh(vb, nb, remapBuilder.GetIB(), remapBuilder.BuildRemap(), onMesh);
+		}
 	}
 }
 

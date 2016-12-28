@@ -133,10 +133,17 @@ private:
 	GLFramebuffer temporaryFBO_;
 	GLTexture temporaryTexture_;
 
+	struct MeshInfo
+	{
+		GLsizei idxCount = 0;
+		float zMin = 0.0f;
+		float zMax = 0.0f;
+	};
+
 	std::vector<GLBuffer> vBuffers_;
 	std::vector<GLBuffer> nBuffers_;
 	std::vector<GLBuffer> iBuffers_;
-	std::vector<GLsizei> triCount_;
+	std::vector<MeshInfo> meshInfo_;
 
 	ModelData model_;
 	Settings settings_;

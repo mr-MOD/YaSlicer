@@ -138,8 +138,8 @@ Renderer::~Renderer()
 void Renderer::CreateGeometryBuffers()
 {
 	PerfTimer loadModel("Load model");
-	model_.min.x = model_.min.y = model_.min.z = std::numeric_limits<float>::max();
-	model_.max.x = model_.max.y = model_.max.z = std::numeric_limits<float>::lowest();
+	model_.min = glm::vec3(std::numeric_limits<float>::max());
+	model_.max = glm::vec3(std::numeric_limits<float>::lowest());
 
 	LoadModel(settings_.modelFile,
 		[this](const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint16_t>& ib) {
@@ -160,18 +160,23 @@ void Renderer::CreateGeometryBuffers()
 		this->vBuffers_.push_back(std::move(vertexBuffer));
 		this->nBuffers_.push_back(std::move(normalBuffer));
 		this->iBuffers_.push_back(std::move(indexBuffer));
-		this->triCount_.push_back(static_cast<GLsizei>(ib.size()));
 
+		glm::vec3 meshMin(std::numeric_limits<float>::max());
+		glm::vec3 meshMax(std::numeric_limits<float>::lowest());
 		for (auto i = 0u; i < vb.size(); i += 3)
 		{
-			model_.min.x = std::min(model_.min.x, vb[i + 0]);
-			model_.min.y = std::min(model_.min.y, vb[i + 1]);
-			model_.min.z = std::min(model_.min.z, vb[i + 2]);
-
-			model_.max.x = std::max(model_.max.x, vb[i + 0]);
-			model_.max.y = std::max(model_.max.y, vb[i + 1]);
-			model_.max.z = std::max(model_.max.z, vb[i + 2]);
+			const auto& vertexPosition = *reinterpret_cast<const glm::vec3*>(&vb[i + 0]);
+			meshMin = glm::min(meshMin, vertexPosition);
+			meshMax = glm::max(meshMax, vertexPosition);
 		}
+		MeshInfo info;
+		info.idxCount = static_cast<GLsizei>(ib.size());
+		info.zMin = meshMin.z;
+		info.zMax = meshMax.z;
+		this->meshInfo_.push_back(info);
+
+		model_.min = glm::min(model_.min, meshMin);
+		model_.max = glm::max(model_.max, meshMax);
 	});
 	model_.pos = model_.min.z;
 
@@ -181,7 +186,7 @@ void Renderer::CreateGeometryBuffers()
 		throw std::runtime_error("Model is larger than platform");
 	}
 
-	BOOST_LOG_TRIVIAL(info) << "Split parts: " << triCount_.size();
+	BOOST_LOG_TRIVIAL(info) << "Split parts: " << meshInfo_.size();
 	BOOST_LOG_TRIVIAL(info) << "Model dimensions: " << extent.x << " x " << extent.y << " x " << extent.z;
 }
 
@@ -359,16 +364,19 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix, float inflateDistance)
 	glStencilFunc(GL_ALWAYS, 0, 0xFF);
 	for (auto i = 0u; i < vBuffers_.size(); ++i)
 	{
-		glBindBuffer(GL_ARRAY_BUFFER, vBuffers_[i].GetHandle());
-		glVertexAttribPointer(mainVertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-		glEnableVertexAttribArray(mainVertexPosAttrib_);
+		if (meshInfo_[i].zMax + inflateDistance >= model_.pos)
+		{
+			glBindBuffer(GL_ARRAY_BUFFER, vBuffers_[i].GetHandle());
+			glVertexAttribPointer(mainVertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+			glEnableVertexAttribArray(mainVertexPosAttrib_);
 
-		glBindBuffer(GL_ARRAY_BUFFER, nBuffers_[i].GetHandle());
-		glVertexAttribPointer(mainVertexNormalAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-		glEnableVertexAttribArray(mainVertexNormalAttrib_);
+			glBindBuffer(GL_ARRAY_BUFFER, nBuffers_[i].GetHandle());
+			glVertexAttribPointer(mainVertexNormalAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+			glEnableVertexAttribArray(mainVertexNormalAttrib_);
 
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, iBuffers_[i].GetHandle());
-		glDrawElements(GL_TRIANGLES, triCount_[i], GL_UNSIGNED_SHORT, 0);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, iBuffers_[i].GetHandle());
+			glDrawElements(GL_TRIANGLES, meshInfo_[i].idxCount, GL_UNSIGNED_SHORT, 0);
+		}
 	}	
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);

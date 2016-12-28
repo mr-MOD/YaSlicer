@@ -9,8 +9,10 @@
 
 #include <boost/container/small_vector.hpp>
 
+
+using MeshCallback = std::function<void(const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib)>;
 void SplitMesh(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
-	const std::function<void(const std::vector<float>& vb, const std::vector<float>& nb, const std::vector<uint32_t>& ib)>& onMesh);
+	const MeshCallback& onMesh);
 
 struct AdjacentFaces
 {
