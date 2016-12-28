@@ -81,11 +81,20 @@ private:
 		glm::vec3 max;
 	};
 
+	struct MeshInfo
+	{
+		GLsizei idxCount = 0;
+		float zMin = 0.0f;
+		float zMax = 0.0f;
+	};
+
 	using UniformSetterType = std::function<void(const GLProgram&)>;
 	using UniformSetters = std::vector<UniformSetterType>;
 
 	void CreateGeometryBuffers();
 
+	bool IsUpsideDownRendering() const;
+	bool ShouldRender(const MeshInfo& info, float inflateDistance);
 	void Render();
 	glm::mat4x4 CalculateModelTransform() const;
 	glm::mat4x4 CalculateViewTransform() const;
@@ -102,6 +111,10 @@ private:
 	void Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix, const GLTexture& mask);
 
 	uint32_t GetCurrentSlice() const;
+	float GetMirrorXFactor() const;
+	float GetMirrorYFactor() const;
+	bool ShouldMirrorX() const;
+	bool ShouldMirrorY() const;
 
 	GLProgram mainProgram_;
 	GLuint mainVertexPosAttrib_;
@@ -133,13 +146,6 @@ private:
 	GLFramebuffer temporaryFBO_;
 	GLTexture temporaryTexture_;
 
-	struct MeshInfo
-	{
-		GLsizei idxCount = 0;
-		float zMin = 0.0f;
-		float zMax = 0.0f;
-	};
-
 	std::vector<GLBuffer> vBuffers_;
 	std::vector<GLBuffer> nBuffers_;
 	std::vector<GLBuffer> iBuffers_;
@@ -148,7 +154,6 @@ private:
 	ModelData model_;
 	Settings settings_;
 
-	glm::vec2 mirror_;
 	glm::vec2 modelOffset_;
 
 	const std::vector<uint32_t> palette_;

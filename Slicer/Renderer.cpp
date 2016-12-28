@@ -37,7 +37,6 @@ namespace
 
 Renderer::Renderer(const Settings& settings) :
 settings_(settings),
-mirror_(1,1),
 modelOffset_(0,0),
 
 mainVertexPosAttrib_(0),
@@ -115,16 +114,6 @@ palette_(CreateGrayscalePalette())
 	glDepthMask(GL_TRUE);
 
 	CreateGeometryBuffers();
-
-	if (settings_.mirrorX)
-	{
-		mirror_.x *= -1;
-	}
-
-	if (settings_.mirrorY)
-	{
-		mirror_.y *= -1;
-	}
 }
 
 Renderer::~Renderer()
@@ -250,9 +239,18 @@ glm::mat4x4 Renderer::CalculateViewTransform() const
 {
 	const auto middle = (model_.min + model_.max) * 0.5f;
 
-	return glm::lookAt(glm::vec3(middle.x, middle.y, model_.pos),
-		glm::vec3(middle.x, middle.y, model_.max.z + 1.0f),
-		glm::vec3(0, -1.0f, 0));
+	if (IsUpsideDownRendering())
+	{
+		return glm::lookAt(glm::vec3(middle.x, middle.y, model_.pos),
+			glm::vec3(middle.x, middle.y, model_.min.z - 1.0f),
+			glm::vec3(0, -1.0f, 0));
+	}
+	else
+	{
+		return glm::lookAt(glm::vec3(middle.x, middle.y, model_.pos),
+			glm::vec3(middle.x, middle.y, model_.max.z + 1.0f),
+			glm::vec3(0, -1.0f, 0));
+	}
 }
 
 glm::mat4x4 Renderer::CalculateProjectionTransform() const
@@ -323,7 +321,7 @@ void Renderer::RenderCommon()
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, settings_.renderWidth, settings_.renderHeight, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, raster.data());
 		glBindTexture(GL_TEXTURE_2D, 0);
 
-		Model(wvpMatrix, (settings_.doInflate ? settings_.inflateDistance : 0.0f)+ settings_.smallSpotInflateDistance);
+		Model(wvpMatrix, (settings_.doInflate ? settings_.inflateDistance : 0.0f) + settings_.smallSpotInflateDistance);
 		Mask(wvpMatrix, wvMatrix, maskTexture_);
 		glContext_->Resolve(temporaryFBO_);
 
@@ -342,6 +340,18 @@ void Renderer::RenderFullscreen()
 	glContext_->SwapBuffers();
 }
 
+bool Renderer::IsUpsideDownRendering() const
+{
+	return model_.pos <= (model_.max.z + model_.min.z) / 2;
+}
+
+bool Renderer::ShouldRender(const MeshInfo& info, float inflateDistance)
+{
+	return IsUpsideDownRendering() ?
+		info.zMin - inflateDistance <= model_.pos :
+		info.zMax + inflateDistance >= model_.pos;
+}
+
 void Renderer::Model(const glm::mat4x4& wvpMatrix, float inflateDistance)
 {
 	glViewport(0, 0, settings_.renderWidth, settings_.renderHeight);
@@ -356,7 +366,7 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix, float inflateDistance)
 
 	glUseProgram(mainProgram_.GetHandle());
 	glUniformMatrix4fv(mainTransformUniform_, 1, GL_FALSE, glm::value_ptr(wvpMatrix));
-	glUniform2fv(mainMirrorUniform_, 1, glm::value_ptr(mirror_));
+	glUniform2fv(mainMirrorUniform_, 1, glm::value_ptr(glm::vec2(GetMirrorXFactor(), GetMirrorYFactor())));
 	glUniform1f(mainInflateUniform_, inflateDistance);
 
 	glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_INCR);
@@ -364,7 +374,7 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix, float inflateDistance)
 	glStencilFunc(GL_ALWAYS, 0, 0xFF);
 	for (auto i = 0u; i < vBuffers_.size(); ++i)
 	{
-		if (meshInfo_[i].zMax + inflateDistance >= model_.pos)
+		if (ShouldRender(meshInfo_[i], inflateDistance))
 		{
 			glBindBuffer(GL_ARRAY_BUFFER, vBuffers_[i].GetHandle());
 			glVertexAttribPointer(mainVertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
@@ -386,19 +396,19 @@ void Renderer::Model(const glm::mat4x4& wvpMatrix, float inflateDistance)
 
 void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix, const GLTexture& mask)
 {
-	glCullFace(GL_BACK);
-
 	glUseProgram(maskProgram_.GetHandle());
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	const float planeZ = IsUpsideDownRendering() ? model_.min.z : model_.max.z;
 	const float quad[] =
 	{
-		model_.min.x, model_.min.y, model_.max.z,
-		model_.min.x, model_.max.y, model_.max.z,
-		model_.max.x, model_.max.y, model_.max.z,
+		model_.min.x, model_.min.y, planeZ,
+		model_.min.x, model_.max.y, planeZ,
+		model_.max.x, model_.max.y, planeZ,
 
-		model_.min.x, model_.min.y, model_.max.z,
-		model_.max.x, model_.max.y, model_.max.z,
-		model_.max.x, model_.min.y, model_.max.z
+		model_.min.x, model_.min.y, planeZ,
+		model_.max.x, model_.max.y, planeZ,
+		model_.max.x, model_.min.y, planeZ
 	};
 	glVertexAttribPointer(maskVertexPosAttrib_, 3, GL_FLOAT, GL_FALSE, 0, quad);
 	glEnableVertexAttribArray(maskVertexPosAttrib_);
@@ -406,7 +416,8 @@ void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix, c
 	glEnable(GL_STENCIL_TEST);
 	glStencilMask(0xFF);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-	glStencilFunc(settings_.mirrorX ^ settings_.mirrorY ? GL_GREATER : GL_LESS, 0x80, 0xFF);
+
+	glStencilFunc(ShouldMirrorX() ^ ShouldMirrorY() ? GL_GREATER : GL_LESS, 0x80, 0xFF);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 	glUniformMatrix4fv(maskWVTransformUniform_, 1, GL_FALSE, glm::value_ptr(wvMatrix));
@@ -427,6 +438,26 @@ void Renderer::Mask(const glm::mat4x4& wvpMatrix, const glm::mat4x4& wvMatrix, c
 uint32_t Renderer::GetCurrentSlice() const
 {
 	return static_cast<uint32_t>(std::max((model_.pos - model_.min.z) / settings_.step + 0.5f - 1, 0.0f));
+}
+
+float Renderer::GetMirrorXFactor() const
+{
+	return ShouldMirrorX() ? -1.0f : 1.0f;
+}
+
+float Renderer::GetMirrorYFactor() const
+{
+	return ShouldMirrorY() ? -1.0f : 1.0f;
+}
+
+bool Renderer::ShouldMirrorX() const
+{
+	return settings_.mirrorX ^ IsUpsideDownRendering();
+}
+
+bool Renderer::ShouldMirrorY() const
+{
+	return settings_.mirrorY;
 }
 
 void Renderer::RenderOmniDilate(float scale, uint32_t kernelSize)
