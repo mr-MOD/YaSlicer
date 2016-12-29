@@ -244,21 +244,12 @@ std::vector<std::vector<uint32_t>> BuildLayers(const std::vector<float>& vb, con
 
 	const auto layerHeight = (meshMinMaxZ.second->z - meshMinMaxZ.first->z) / layerCount;
 
-	std::vector<std::vector<uint32_t>> result(layerCount + 1);
-	const auto crossLayerIndex = layerCount;
+	std::vector<std::vector<uint32_t>> result(layerCount);
 	for (size_t i = 0, size = ib.size(); i < size; i += 3)
 	{
 		const uint32_t v[] = { ib[i + 0], ib[i + 1], ib[i + 2] };
-		const auto minMaxItPair = std::minmax_element(std::begin(v), std::end(v),
-			[verts = verticesBegin](const auto& a, const auto& b) { return verts[a].z < verts[b].z; });
-		const auto faceMinZ = verticesBegin[*minMaxItPair.first].z;
-		const auto faceMaxZ = verticesBegin[*minMaxItPair.second].z;
-
-		const auto layerNumberMin = std::min(layerCount - 1, static_cast<int>((faceMinZ - meshMinMaxZ.first->z) / layerHeight));
-		const auto layerNumberMax = std::min(layerCount - 1, static_cast<int>((faceMaxZ - meshMinMaxZ.first->z) / layerHeight));
-
-		const auto layerNumber = layerNumberMin == layerNumberMax ? layerNumberMin : crossLayerIndex;
-
+		const auto faceMinZ = std::min(std::min(verticesBegin[v[0]].z, verticesBegin[v[1]].z), verticesBegin[v[2]].z);
+		const auto layerNumber = std::min(layerCount - 1, static_cast<int>((faceMinZ - meshMinMaxZ.first->z) / layerHeight));
 		auto& layerIb = result[layerNumber];
 		layerIb.insert(layerIb.end(), std::begin(v), std::end(v));
 	}
@@ -269,7 +260,7 @@ std::vector<std::vector<uint32_t>> BuildLayers(const std::vector<float>& vb, con
 void SplitMesh(std::vector<float>& vb, std::vector<float>& nb, std::vector<uint32_t>& ib, const uint32_t maxVertsInBuffer,
 	const MeshCallback& onMesh)
 {
-	const auto LayerCount = 5;
+	const auto LayerCount = 6;
 	const auto layersIb = BuildLayers(vb, ib, LayerCount);
 
 	for (const auto& currentIb : layersIb)

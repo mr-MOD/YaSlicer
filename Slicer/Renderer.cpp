@@ -582,6 +582,10 @@ void Renderer::SavePng(const std::string& fileName)
 	const auto targetWidth = settings_.renderWidth;
 	const auto targetHeight = settings_.renderHeight;
 	auto future = std::async(std::launch::async, [pixData, fileName, targetWidth, targetHeight, this]() {
+		if (this->settings_.simulate)
+		{
+			return;
+		}
 		const auto BitsPerChannel = 8;
 		WritePng(fileName, targetWidth, targetHeight, BitsPerChannel, *pixData, this->palette_);
 	});

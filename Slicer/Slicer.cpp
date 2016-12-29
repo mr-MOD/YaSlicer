@@ -50,12 +50,12 @@ void WriteWhiteLayers(const Settings& settings, const std::pair<glm::vec2, glm::
 	}	
 }
 
-void RenderModel(Renderer& r, const Settings& settings, bool simulate)
+void RenderModel(Renderer& r, const Settings& settings)
 {
 	PerfTimer renderTime("Render time");
 	const auto outputDir = boost::filesystem::path(settings.outputDir);
 	
-	if (!simulate)
+	if (!settings.simulate)
 	{
 		boost::filesystem::create_directories(settings.outputDir);
 		WriteWhiteLayers(settings, r.GetModelProjectionRect());
@@ -67,12 +67,8 @@ void RenderModel(Renderer& r, const Settings& settings, bool simulate)
 	do
 	{
 		auto filePath = (outputDir / GetOutputFileName(settings, imageNumber++)).string();
-
-		if (!simulate)
-		{
-			r.SavePng(filePath);
-		}
-
+		r.SavePng(filePath);
+	
 		if (settings.doOverhangAnalysis)
 		{
 			r.AnalyzeOverhangs(imageNumber-1);
@@ -82,11 +78,7 @@ void RenderModel(Renderer& r, const Settings& settings, bool simulate)
 		{
 			r.ERM();
 			filePath = (outputDir / GetOutputFileName(settings, imageNumber++)).string();
-
-			if (!simulate)
-			{
-				r.SavePng(filePath);
-			}
+			r.SavePng(filePath);
 		}
 
 		++nSlice;
@@ -94,7 +86,7 @@ void RenderModel(Renderer& r, const Settings& settings, bool simulate)
 
 	BOOST_LOG_TRIVIAL(info) << "Total slices: " << nSlice;
 
-	if (!simulate)
+	if (!settings.simulate)
 	{
 		WriteEnvisiontechConfig(settings, "job.cfg", nSlice);
 	}
@@ -105,7 +97,6 @@ int main(int argc, char** argv)
 	try
 	{
 		Settings settings;
-		bool simulate = false;
 		bool verbose = false;
 		std::string configFile;
 
@@ -155,7 +146,7 @@ int main(int argc, char** argv)
 			("mirrorX", po::value<bool>(&settings.mirrorX)->default_value(settings.mirrorX), "mirror image horizontally")
 			("mirrorY", po::value<bool>(&settings.mirrorY)->default_value(settings.mirrorY), "mirror image vertically")
 
-			("simulate", po::value<bool>(&simulate)->default_value(simulate), "do not save files")
+			("simulate", po::value<bool>(&settings.simulate)->default_value(settings.simulate), "do not save files")
 			("verbose", po::value<bool>(&verbose)->default_value(verbose), "print extended information")
 			;
 
@@ -194,7 +185,7 @@ int main(int argc, char** argv)
 		}
 
 		Renderer r(settings);
-		RenderModel(r, settings, simulate);
+		RenderModel(r, settings);
 
 		PROCESS_MEMORY_COUNTERS pmc{};
 		GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));

@@ -51,6 +51,8 @@ struct Settings
 
 	bool mirrorX = false;
 	bool mirrorY = false;
+
+	bool simulate = false;
 };
 
 class Renderer
