@@ -1,12 +1,19 @@
 #include "GlContextANGLE.h"
 
+#include <egl/eglext.h>
+
+#include <d3d11.h>
+#include <atlbase.h>
+#pragma comment (lib, "d3d11.lib")
+
 #include <stdexcept>
 #include <cassert>
 #include <algorithm>
 
 namespace
 {
-	void CheckRequiredExtensions();
+	void CheckRequiredEGLExtensions(EGLDisplay display);
+	void CheckRequiredGLExtensions();
 }
 
 GlContextANGLE::GlContextANGLE(uint32_t width, uint32_t height, uint32_t samples) :
@@ -18,7 +25,7 @@ height_(height)
 		throw std::runtime_error("Invalid render target size");
 	}
 
-	gl_.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+	gl_.display = eglGetDisplay(EGL_D3D11_ONLY_DISPLAY_ANGLE);
 	if (!gl_.display)
 	{
 		throw std::runtime_error("Can't get egl display");
@@ -28,6 +35,8 @@ height_(height)
 	{
 		throw std::runtime_error("Can't initialize egl");
 	}
+
+	CheckRequiredEGLExtensions(gl_.display);
 
 	EGLint const attributeList[] =
 	{
@@ -83,7 +92,7 @@ height_(height)
 		throw std::runtime_error("Samples count requested is not supported");
 	}
 
-	CheckRequiredExtensions();
+	CheckRequiredGLExtensions();
 	CreateMultisampledFBO(width_, height_, samples);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, gl_.fbo.GetHandle());
@@ -135,13 +144,11 @@ uint32_t GlContextANGLE::GetSurfaceHeight() const
 	return height_;
 }
 
-std::vector<uint8_t> GlContextANGLE::GetRaster()
+std::vector<uint8_t> GlContextANGLE::GetRasterGLES()
 {
 	const auto FBOBytesPerPixel = 4;
-	if (tempPixelBuffer_.empty())
-	{
-		tempPixelBuffer_.resize(GetSurfaceWidth() * GetSurfaceHeight() * FBOBytesPerPixel);
-	}
+
+	std::vector<uint8_t> tempPixelBuffer(GetSurfaceWidth() * GetSurfaceHeight() * FBOBytesPerPixel);
 
 	GLint currentFBO = 0;
 	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFBO);
@@ -149,17 +156,78 @@ std::vector<uint8_t> GlContextANGLE::GetRaster()
 
 	glBindFramebuffer(GL_READ_FRAMEBUFFER_ANGLE, 0);
 	glPixelStorei(GL_PACK_ALIGNMENT, 1);
-	glReadPixels(0, 0, GetSurfaceWidth(), GetSurfaceHeight(), GL_RGBA, GL_UNSIGNED_BYTE, tempPixelBuffer_.data());
+	glReadPixels(0, 0, GetSurfaceWidth(), GetSurfaceHeight(), GL_RGBA, GL_UNSIGNED_BYTE, tempPixelBuffer.data());
 	GL_CHECK();
 
 	std::vector<uint8_t> retVal(GetSurfaceWidth() * GetSurfaceHeight());
-	for (auto i = 0u; i < tempPixelBuffer_.size(); i += FBOBytesPerPixel)
+	for (auto i = 0u; i < tempPixelBuffer.size(); i += FBOBytesPerPixel)
 	{
-		retVal[i / FBOBytesPerPixel] = tempPixelBuffer_[i];
+		retVal[i / FBOBytesPerPixel] = tempPixelBuffer[i];
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, currentFBO);
 	return retVal;
+}
+
+// All extraction & manipulation with underlying d3d11 device here is for performance
+// (about 2x faster than glReadPixels on ANGLE).
+std::vector<uint8_t> GlContextANGLE::GetRaster()
+{
+	auto queryDisplayAttribEXT =
+		(PFNEGLQUERYDISPLAYATTRIBEXTPROC)eglGetProcAddress("eglQueryDisplayAttribEXT");
+	auto queryDeviceAttribEXT =
+		(PFNEGLQUERYDEVICEATTRIBEXTPROC)eglGetProcAddress("eglQueryDeviceAttribEXT");
+	
+	EGLAttrib angleDevice;
+	EGLAttrib d3d11Device;
+	CHECK(queryDisplayAttribEXT(gl_.display, EGL_DEVICE_EXT, &angleDevice));
+	CHECK(queryDeviceAttribEXT(reinterpret_cast<EGLDeviceEXT>(angleDevice),
+		EGL_D3D11_DEVICE_ANGLE, &d3d11Device));
+
+	CComPtr<ID3D11Device> device(reinterpret_cast<ID3D11Device*>(d3d11Device));
+
+	CComPtr<ID3D11DeviceContext> context;
+	device->GetImmediateContext(&context);
+
+	CComPtr<ID3D11RenderTargetView> rtView;
+	context->OMGetRenderTargets(1, &rtView, nullptr);
+	CHECK(rtView != nullptr);
+
+	CComPtr<ID3D11Resource> rtResource;
+	rtView->GetResource(&rtResource);
+
+	CComPtr<ID3D11Texture2D> resolveTarget;
+	CComPtr<ID3D11Texture2D> sysmemTarget;
+
+	CComQIPtr<ID3D11Texture2D> rtTexture(rtResource);
+	D3D11_TEXTURE2D_DESC rtDesc;
+	rtTexture->GetDesc(&rtDesc);
+	rtDesc.MiscFlags = 0;
+	rtDesc.BindFlags = 0;
+	rtDesc.SampleDesc.Count = 1;
+	rtDesc.SampleDesc.Quality = 0;
+	CHECK(SUCCEEDED(device->CreateTexture2D(&rtDesc, nullptr, &resolveTarget)));
+	context->ResolveSubresource(resolveTarget, 0, rtTexture, 0, rtDesc.Format);
+
+	rtDesc.Usage = D3D11_USAGE_STAGING;
+	rtDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	CHECK(SUCCEEDED(device->CreateTexture2D(&rtDesc, nullptr, &sysmemTarget)));
+	context->CopyResource(sysmemTarget, resolveTarget);
+
+	std::vector<uint8_t> result(rtDesc.Width * rtDesc.Height);
+
+	D3D11_MAPPED_SUBRESOURCE mapInfo;
+	CHECK(SUCCEEDED(context->Map(sysmemTarget, 0, D3D11_MAP_READ, 0, &mapInfo)));
+	const auto TextureBytesPerPixel = 4;
+	for (size_t y = 0; y < rtDesc.Height; ++y)
+	{
+		for (size_t x = 0; x < rtDesc.Width; ++x)
+		{
+			result[rtDesc.Width*y + x] = reinterpret_cast<const uint8_t*>(mapInfo.pData)[mapInfo.RowPitch*y + x*TextureBytesPerPixel];
+		}
+	}
+	context->Unmap(sysmemTarget, 0);
+	return result;
 }
 
 void GlContextANGLE::SetRaster(const std::vector<uint8_t>& raster, uint32_t width, uint32_t height)
@@ -255,25 +323,43 @@ std::unique_ptr<IGlContext> CreateOffscreenGlContext(uint32_t width, uint32_t he
 
 namespace
 {
-	void CheckRequiredExtensions()
+void CheckRequiredEGLExtensions(EGLDisplay display)
+{
+	const std::string eglExtString = eglQueryString(display, EGL_EXTENSIONS);
+	const char* requiredEglExtensions[] =
 	{
-		std::string extString = (const char*)glGetString(GL_EXTENSIONS);
+		"EGL_EXT_device_query"
+	};
+	const auto unsupportedEglExtIt =
+		std::find_if(std::begin(requiredEglExtensions), std::end(requiredEglExtensions), [&eglExtString](auto ext) {
+		return eglExtString.find(ext) == std::string::npos;
+	});
 
-		const char* extensions[] =
-		{
-			"GL_EXT_texture_storage",
-			"GL_ANGLE_framebuffer_blit",
-			"GL_ANGLE_framebuffer_multisample",
-			"GL_OES_packed_depth_stencil"
-		};
+	if (unsupportedEglExtIt != std::end(requiredEglExtensions))
+	{
+		throw std::runtime_error(std::string("Your system do not support EGL extension: ") + *unsupportedEglExtIt);
+	}
+}
 
-		auto it = std::find_if(std::begin(extensions), std::end(extensions), [&extString](const char* ext) {
-			return extString.find(ext) == std::string::npos;
+void CheckRequiredGLExtensions()
+{
+	const std::string glExtString = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+	const char* requiredGlExtensions[] =
+	{
+		"GL_EXT_texture_storage",
+		"GL_ANGLE_framebuffer_blit",
+		"GL_ANGLE_framebuffer_multisample",
+		"GL_OES_packed_depth_stencil"
+	};
+
+	const auto unsupportedGlExtIt =
+		std::find_if(std::begin(requiredGlExtensions), std::end(requiredGlExtensions), [&glExtString](auto ext) {
+			return glExtString.find(ext) == std::string::npos;
 		});
 
-		if (it != std::end(extensions))
-		{
-			throw std::runtime_error(std::string("Your system do not support extension: ") + *it);
-		}
+	if (unsupportedGlExtIt != std::end(requiredGlExtensions))
+	{
+		throw std::runtime_error(std::string("Your system do not support GL extension: ") + *unsupportedGlExtIt);
 	}
+}
 }

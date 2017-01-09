@@ -16,6 +16,7 @@ private:
 
 	void SwapBuffers() override;
 	std::vector<uint8_t> GetRaster() override;
+	std::vector<uint8_t> GetRasterGLES();
 	void SetRaster(const std::vector<uint8_t>& raster, uint32_t width, uint32_t height) override;
 
 	void CreateTextureFBO(GLFramebuffer& fbo, GLTexture& texture) override;
@@ -47,7 +48,6 @@ private:
 	};
 
 	GLData gl_;
-	std::vector<uint8_t> tempPixelBuffer_;
 	uint32_t width_;
 	uint32_t height_;
 
