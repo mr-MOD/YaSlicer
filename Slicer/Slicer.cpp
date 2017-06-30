@@ -162,7 +162,7 @@ int main(int argc, char** argv)
 
 		if (vm.count("help") || argc < 2)
 		{
-			std::cout << "Yarilo slicer v0.90, 2016" << "\n";
+			std::cout << "Yarilo slicer v0.91, 2017" << "\n";
 			std::cout << cmdline_options << "\n";
 			return 0;
 		}
