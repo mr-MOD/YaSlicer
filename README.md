@@ -11,10 +11,19 @@ Features:
 - Low dependencies count: boost, angle, libpng, glm, glew32
 - Job file output for Envisiontech machines
 
+Limitations:
+- Do not check input models for any inconsistencies like cracks, holes, etc. Should not crash, but result may be incorrect.
+- Windows only, though may be ported to other environments (some attempts were made to run on RaspberryPi).
+- Need D3D11 drivers (but can work on D3D9 hardware).
+
+Prerequisites:
+- Microsoft Visual Studio 2017 with 64-bits C++ compiler (free Community edition is fine).
+- vcpkg package manager
+
 Build:
-1. Get vcpkg and install packages:
+1. install dependencies with vcpkg:
 vcpkg install angle boost glew glm libpng --triplet x64-windows
-2. Open Tools.sln in Visual Studio 2017 (free Community edition is fine)
+2. Open Tools.sln in Visual Studio 2017 
 3. Build
 
 Usage:
