@@ -232,7 +232,7 @@ glm::mat4x4 Renderer::CalculateModelTransform() const
 	const auto offsetX = (settings_.plateWidth / settings_.renderWidth) * modelOffset_.x;
 	const auto offsetY = (settings_.plateHeight / settings_.renderHeight) * modelOffset_.y;
 
-	return glm::scale(glm::vec3(1.0f, 1.0f, 1.0f)) * glm::translate(offsetX, offsetY, 0.0f);
+	return scale(glm::vec3(1.0f, 1.0f, 1.0f)) * translate(glm::vec3(offsetX, offsetY, 0.0f));
 }
 
 glm::mat4x4 Renderer::CalculateViewTransform() const
@@ -648,13 +648,13 @@ std::pair<glm::vec2, glm::vec2> Renderer::GetModelProjectionRect() const
 	const auto proj = CalculateProjectionTransform();
 
 	const auto screen = 
-		glm::translate(0.5f * settings_.renderWidth, 0.5f * settings_.renderHeight, 0.0f) *
-		glm::scale(0.5f * settings_.renderWidth, 0.5f * settings_.renderHeight, 1.0f);
+		translate(glm::vec3(0.5f * settings_.renderWidth, 0.5f * settings_.renderHeight, 0.0f)) *
+		scale(glm::vec3(0.5f * settings_.renderWidth, 0.5f * settings_.renderHeight, 1.0f));
 
 	const auto combinedMatrix = glm::transpose(screen * proj * view * model);
 	
-	const auto homoMin = glm::mul(glm::vec4(model_.min, 1.0f), combinedMatrix);
-	const auto homoMax = glm::mul(glm::vec4(model_.max, 1.0f), combinedMatrix);
+	const auto homoMin = glm::vec4(model_.min, 1.0f) * combinedMatrix;
+	const auto homoMax = glm::vec4(model_.max, 1.0f) * combinedMatrix;
 
 	const auto screenMin = glm::vec2(homoMin / homoMin.w);
 	const auto screenMax = glm::vec2(homoMax / homoMax.w);
