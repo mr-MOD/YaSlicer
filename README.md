@@ -28,3 +28,6 @@ vcpkg install angle boost glew glm libpng --triplet x64-windows
 
 Usage:
 run slicer.exe --help for options
+
+or just try
+slicer.exe --modelFile=<your stl file> --outputDir=<your output directory>

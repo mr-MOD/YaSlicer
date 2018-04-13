@@ -86,7 +86,7 @@ void RenderModel(Renderer& r, const Settings& settings)
 
 	BOOST_LOG_TRIVIAL(info) << "Total slices: " << nSlice;
 
-	if (!settings.simulate)
+	if (!settings.simulate && !settings.envisiontechTemplatesPath.empty())
 	{
 		WriteEnvisiontechConfig(settings, "job.cfg", nSlice);
 	}
@@ -106,7 +106,7 @@ int main(int argc, char** argv)
 		po::options_description generic("generic options");
 		generic.add_options()
 			("help,h", "produce help message")
-			("config,c", po::value<std::string>(&configFile)->default_value("config.cfg"), "slicing configuration file")
+			("config,c", po::value<std::string>(&configFile), "slicing configuration file")
 			;
 
 		// Declare a group of options that will be 
@@ -162,14 +162,17 @@ int main(int argc, char** argv)
 
 		if (vm.count("help") || argc < 2)
 		{
-			std::cout << "Yarilo slicer v0.91, 2017" << "\n";
+			std::cout << "Yarilo slicer v0.92, 2018" << "\n";
 			std::cout << cmdline_options << "\n";
 			return 0;
 		}
 
-		po::store(po::parse_config_file<char>(configFile.c_str(), config_file_options), vm);
-		po::notify(vm);
-
+        if (!configFile.empty())
+        {
+            po::store(po::parse_config_file<char>(configFile.c_str(), config_file_options), vm);
+            po::notify(vm);
+        }
+		
 		if (settings.modelFile.empty())
 		{
 			std::cout << "No model to slice, exit" << "\n";

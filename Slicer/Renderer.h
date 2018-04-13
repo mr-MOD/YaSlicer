@@ -43,7 +43,7 @@ struct Settings
 	float maxSupportedDistance = 0.5f;
 
 	bool enableERM = false;
-	std::string envisiontechTemplatesPath = "envisiontech";
+	std::string envisiontechTemplatesPath;
 	
 	bool doSmallSpotsProcessing = false;
 	float smallSpotThreshold = 1.0f;
