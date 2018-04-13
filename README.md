@@ -30,4 +30,7 @@ Usage:
 run slicer.exe --help for options
 
 or just try
-slicer.exe --modelFile=<your stl file> --outputDir=<your output directory>
+slicer.exe -m model.stl -o output
+then you should find png slices in "output" subdirectory.
+
+Detailed options description: To Be Done.
